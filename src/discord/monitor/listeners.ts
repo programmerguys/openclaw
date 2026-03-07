@@ -64,7 +64,7 @@ type DiscordReactionRoutingParams = {
 
 const DISCORD_SLOW_LISTENER_THRESHOLD_MS = 30_000;
 const discordEventQueueLog = createSubsystemLogger("discord/event-queue");
-const DISCORD_RAW_LOG_PREFIX = "[discord-raw]";
+export const DISCORD_RAW_LOG_PREFIX = "[discord-raw]";
 
 function pickMentionUserIds(data: DiscordMessageEvent): string[] {
   const message = data.message as {
@@ -79,7 +79,7 @@ function pickMentionUserIds(data: DiscordMessageEvent): string[] {
   return source.map((user) => (typeof user?.id === "string" ? user.id.trim() : "")).filter(Boolean);
 }
 
-function logDiscordRawMessageEvent(data: DiscordMessageEvent) {
+export function logDiscordRawMessageEvent(data: DiscordMessageEvent, options?: { stage?: string }) {
   const message = data.message as {
     id?: string;
     content?: string | null;
@@ -112,6 +112,7 @@ function logDiscordRawMessageEvent(data: DiscordMessageEvent) {
   const parts = [
     DISCORD_RAW_LOG_PREFIX,
     `event=MESSAGE_CREATE`,
+    options?.stage ? `stage=${options.stage}` : undefined,
     `messageId=${message.id ?? "unknown"}`,
     `channelId=${data.channel_id ?? "unknown"}`,
     `guildId=${data.guild_id ?? "dm"}`,
@@ -123,7 +124,7 @@ function logDiscordRawMessageEvent(data: DiscordMessageEvent) {
     `content=${content.trim() ? "present" : "empty"}`,
     `mentions=${mentions.join(",") || "none"}`,
     `authorPresent=${author ? "yes" : "no"}`,
-  ];
+  ].filter(Boolean);
   logDebug(parts.join(" "));
 }
 
@@ -190,6 +191,12 @@ export function registerDiscordListener(listeners: Array<object>, listener: obje
   }
   listeners.push(listener);
   return true;
+}
+
+export class DiscordGatewayDispatchTapListener extends MessageCreateListener {
+  async handle(data: DiscordMessageEvent) {
+    logDiscordRawMessageEvent(data, { stage: "gateway-dispatch" });
+  }
 }
 
 export class DiscordMessageListener extends MessageCreateListener {

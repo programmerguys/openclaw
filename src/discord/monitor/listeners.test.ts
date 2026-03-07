@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { DiscordMessageListener } from "./listeners.js";
+import { DiscordGatewayDispatchTapListener, DiscordMessageListener } from "./listeners.js";
 
 function createLogger() {
   return {
@@ -28,6 +28,43 @@ function fakeEvent(channelId: string, overrides?: Record<string, unknown>) {
     ...overrides,
   } as never;
 }
+
+describe("DiscordGatewayDispatchTapListener", () => {
+  it("emits grep-friendly raw ingress logs at gateway-dispatch stage", async () => {
+    const debugSpy = vi.spyOn(await import("../../logger.js"), "logDebug");
+    const listener = new DiscordGatewayDispatchTapListener();
+
+    await expect(
+      listener.handle(
+        fakeEvent("ch-dispatch-1", {
+          author: undefined,
+          message: {
+            id: "message-dispatch-1",
+            channelId: "ch-dispatch-1",
+            content: "",
+            type: 0,
+            webhook_id: "wh-dispatch-1",
+            application_id: "app-dispatch-1",
+            mentions: { users: [{ id: "bot-dispatch-1" }, { id: "bot-dispatch-2" }] },
+            rawData: {
+              webhook_id: "wh-dispatch-1",
+              application_id: "app-dispatch-1",
+              author: { id: "relay-dispatch-1", bot: true },
+            },
+          },
+        }),
+        {} as never,
+      ),
+    ).resolves.toBeUndefined();
+
+    expect(debugSpy).toHaveBeenCalledWith(
+      expect.stringContaining(
+        "[discord-raw] event=MESSAGE_CREATE stage=gateway-dispatch messageId=message-dispatch-1 channelId=ch-dispatch-1 guildId=guild-1 authorId=relay-dispatch-1 authorBot=true webhookId=wh-dispatch-1 applicationId=app-dispatch-1 type=0 content=empty mentions=bot-dispatch-1,bot-dispatch-2 authorPresent=no",
+      ),
+    );
+    debugSpy.mockRestore();
+  });
+});
 
 describe("DiscordMessageListener", () => {
   it("returns immediately without awaiting handler completion", async () => {

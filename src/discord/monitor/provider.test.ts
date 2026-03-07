@@ -2,6 +2,7 @@ import { EventEmitter } from "node:events";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../../config/config.js";
 import type { RuntimeEnv } from "../../runtime.js";
+import * as listenersModule from "./listeners.js";
 
 const {
   clientFetchUserMock,
@@ -198,6 +199,7 @@ vi.mock("./gateway-plugin.js", () => ({
 }));
 
 vi.mock("./listeners.js", () => ({
+  DiscordGatewayDispatchTapListener: class DiscordGatewayDispatchTapListener {},
   DiscordMessageListener: class DiscordMessageListener {},
   DiscordPresenceListener: class DiscordPresenceListener {},
   DiscordReactionListener: class DiscordReactionListener {},
@@ -360,6 +362,26 @@ describe("monitorDiscordProvider", () => {
     const eventQueue = getConstructedEventQueue();
     expect(eventQueue).toBeDefined();
     expect(eventQueue?.listenerTimeout).toBe(120_000);
+  });
+
+  it("registers gateway-dispatch tap before the message listener", async () => {
+    const { monitorDiscordProvider } = await import("./provider.js");
+    const registerDiscordListenerMock = vi.mocked(listenersModule.registerDiscordListener);
+
+    await monitorDiscordProvider({
+      config: baseConfig(),
+      runtime: baseRuntime(),
+    });
+
+    const constructorNames = registerDiscordListenerMock.mock.calls.map(
+      (call) => (call[1] as { constructor?: { name?: string } }).constructor?.name,
+    );
+    const dispatchTapIndex = constructorNames.indexOf("DiscordGatewayDispatchTapListener");
+    const messageListenerIndex = constructorNames.indexOf("DiscordMessageListener");
+
+    expect(dispatchTapIndex).toBeGreaterThanOrEqual(0);
+    expect(messageListenerIndex).toBeGreaterThanOrEqual(0);
+    expect(dispatchTapIndex).toBeLessThan(messageListenerIndex);
   });
 
   it("forwards custom eventQueue config from discord config to Carbon Client", async () => {

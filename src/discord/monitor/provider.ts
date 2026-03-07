@@ -59,6 +59,7 @@ import { createExecApprovalButton, DiscordExecApprovalHandler } from "./exec-app
 import { attachEarlyGatewayErrorGuard } from "./gateway-error-guard.js";
 import { createDiscordGatewayPlugin } from "./gateway-plugin.js";
 import {
+  DiscordGatewayDispatchTapListener,
   DiscordMessageListener,
   DiscordPresenceListener,
   DiscordReactionListener,
@@ -561,6 +562,7 @@ export async function monitorDiscordProvider(opts: MonitorDiscordOpts = {}) {
         }
       : undefined;
 
+    registerDiscordListener(client.listeners, new DiscordGatewayDispatchTapListener());
     registerDiscordListener(
       client.listeners,
       new DiscordMessageListener(messageHandler, logger, trackInboundEvent),
