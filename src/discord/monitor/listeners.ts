@@ -10,6 +10,7 @@ import {
 import { danger, logVerbose } from "../../globals.js";
 import { formatDurationSeconds } from "../../infra/format-time/format-duration.ts";
 import { enqueueSystemEvent } from "../../infra/system-events.js";
+import { logDebug } from "../../logger.js";
 import { createSubsystemLogger } from "../../logging/subsystem.js";
 import { KeyedAsyncQueue } from "../../plugin-sdk/keyed-async-queue.js";
 import { resolveAgentRoute } from "../../routing/resolve-route.js";
@@ -63,6 +64,75 @@ type DiscordReactionRoutingParams = {
 
 const DISCORD_SLOW_LISTENER_THRESHOLD_MS = 30_000;
 const discordEventQueueLog = createSubsystemLogger("discord/event-queue");
+const DISCORD_RAW_LOG_PREFIX = "[discord-raw]";
+
+function pickMentionUserIds(data: DiscordMessageEvent): string[] {
+  const message = data.message as {
+    mentionedUsers?: Array<{ id?: string | null }> | null;
+    mentions?: { users?: Array<{ id?: string | null }> | null } | null;
+  };
+  const fromMentionedUsers = Array.isArray(message.mentionedUsers)
+    ? message.mentionedUsers
+    : undefined;
+  const fromMentions = Array.isArray(message.mentions?.users) ? message.mentions?.users : undefined;
+  const source = fromMentionedUsers ?? fromMentions ?? [];
+  return source.map((user) => (typeof user?.id === "string" ? user.id.trim() : "")).filter(Boolean);
+}
+
+function logDiscordRawMessageEvent(data: DiscordMessageEvent) {
+  const message = data.message as {
+    id?: string;
+    content?: string | null;
+    type?: unknown;
+    webhookId?: string | null;
+    webhook_id?: string | null;
+    applicationId?: string | null;
+    application_id?: string | null;
+    author?: { id?: string | null; bot?: boolean | null } | null;
+    rawData?: Record<string, unknown> | undefined;
+  };
+  const rawData = message.rawData ?? {};
+  const author = data.author ?? message.author ?? null;
+  const rawAuthor =
+    (rawData["author"] as { id?: string | null; bot?: boolean | null } | undefined) ?? undefined;
+  const authorId = author?.id ?? rawAuthor?.id ?? "none";
+  const authorBot = author?.bot ?? rawAuthor?.bot ?? "unknown";
+  const webhookId =
+    message.webhookId ??
+    message.webhook_id ??
+    (typeof rawData["webhook_id"] === "string" ? rawData["webhook_id"] : null) ??
+    "none";
+  const applicationId =
+    message.applicationId ??
+    message.application_id ??
+    (typeof rawData["application_id"] === "string" ? rawData["application_id"] : null) ??
+    "none";
+  const content = typeof message.content === "string" ? message.content : "";
+  const mentions = pickMentionUserIds(data);
+  const parts = [
+    DISCORD_RAW_LOG_PREFIX,
+    `event=MESSAGE_CREATE`,
+    `messageId=${message.id ?? "unknown"}`,
+    `channelId=${data.channel_id ?? "unknown"}`,
+    `guildId=${data.guild_id ?? "dm"}`,
+    `authorId=${authorId}`,
+    `authorBot=${authorBot}`,
+    `webhookId=${webhookId}`,
+    `applicationId=${applicationId}`,
+    `type=${stringifyDiscordMessageType(message.type)}`,
+    `content=${content.trim() ? "present" : "empty"}`,
+    `mentions=${mentions.join(",") || "none"}`,
+    `authorPresent=${author ? "yes" : "no"}`,
+  ];
+  logDebug(parts.join(" "));
+}
+
+function stringifyDiscordMessageType(value: unknown): string {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return "unknown";
+}
 
 function logSlowDiscordListener(params: {
   logger: Logger | undefined;
@@ -135,6 +205,7 @@ export class DiscordMessageListener extends MessageCreateListener {
 
   async handle(data: DiscordMessageEvent, client: Client) {
     this.onEvent?.();
+    logDiscordRawMessageEvent(data);
     const channelId = data.channel_id;
     // Serialize messages within the same channel to preserve ordering,
     // but allow different channels to proceed in parallel so that

@@ -8,8 +8,25 @@ function createLogger() {
   };
 }
 
-function fakeEvent(channelId: string) {
-  return { channel_id: channelId } as never;
+function fakeEvent(channelId: string, overrides?: Record<string, unknown>) {
+  return {
+    channel_id: channelId,
+    guild_id: "guild-1",
+    author: {
+      id: "author-1",
+      bot: false,
+    },
+    message: {
+      id: "message-1",
+      channelId,
+      content: "hello",
+      mentionedUsers: [],
+      mentionedRoles: [],
+      mentionedEveryone: false,
+      ...overrides,
+    },
+    ...overrides,
+  } as never;
 }
 
 describe("DiscordMessageListener", () => {
@@ -120,5 +137,43 @@ describe("DiscordMessageListener", () => {
         expect.stringContaining("discord handler failed: Error: boom"),
       );
     });
+  });
+
+  it("emits grep-friendly raw ingress logs before dispatch", async () => {
+    const debugSpy = vi.spyOn(await import("../../logger.js"), "logDebug");
+    const handler = vi.fn(async () => {});
+    const listener = new DiscordMessageListener(handler as never, createLogger() as never);
+
+    await expect(
+      listener.handle(
+        fakeEvent("ch-raw-1", {
+          author: undefined,
+          message: {
+            id: "message-raw-1",
+            channelId: "ch-raw-1",
+            content: "",
+            type: 0,
+            webhook_id: "wh-1",
+            application_id: "app-1",
+            mentions: { users: [{ id: "bot-1" }] },
+            rawData: {
+              webhook_id: "wh-1",
+              application_id: "app-1",
+              author: { id: "relay-1", bot: true },
+            },
+          },
+        }),
+        {} as never,
+      ),
+    ).resolves.toBeUndefined();
+
+    await vi.waitFor(() => {
+      expect(debugSpy).toHaveBeenCalledWith(
+        expect.stringContaining(
+          "[discord-raw] event=MESSAGE_CREATE messageId=message-raw-1 channelId=ch-raw-1 guildId=guild-1 authorId=relay-1 authorBot=true webhookId=wh-1 applicationId=app-1 type=0 content=empty mentions=bot-1 authorPresent=no",
+        ),
+      );
+    });
+    debugSpy.mockRestore();
   });
 });

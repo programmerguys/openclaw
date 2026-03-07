@@ -649,6 +649,184 @@ describe("preflightDiscordMessage", () => {
     expect(result).not.toBeNull();
     expect(result?.wasMentioned).toBe(true);
   });
+
+  it("logs raw ingress before preflight for app/webhook-shaped payloads", async () => {
+    const channelId = "channel-raw-log-1";
+    const client = {
+      fetchChannel: async (id: string) => {
+        if (id === channelId) {
+          return {
+            id: channelId,
+            type: ChannelType.GuildText,
+            name: "general",
+          };
+        }
+        return null;
+      },
+    } as unknown as import("@buape/carbon").Client;
+
+    const message = {
+      id: "m-raw-log-1",
+      content: "",
+      timestamp: new Date().toISOString(),
+      channelId,
+      attachments: [],
+      mentions: {
+        users: [{ id: "openclaw-bot" }],
+      },
+      mentionedUsers: undefined,
+      mentionedRoles: [],
+      mentionedEveryone: false,
+      webhook_id: "wh-raw-1",
+      application_id: "app-raw-1",
+      type: 0,
+      author: {
+        id: "relay-app-1",
+        bot: true,
+        username: "Relay",
+      },
+      rawData: {
+        webhook_id: "wh-raw-1",
+        application_id: "app-raw-1",
+        author: {
+          id: "relay-app-1",
+          bot: true,
+        },
+      },
+    } as unknown as import("@buape/carbon").Message;
+
+    const result = await preflightDiscordMessage({
+      cfg: {
+        session: {
+          mainKey: "main",
+          scope: "per-sender",
+        },
+      } as import("../../config/config.js").OpenClawConfig,
+      discordConfig: {
+        allowBots: true,
+      } as NonNullable<import("../../config/config.js").OpenClawConfig["channels"]>["discord"],
+      accountId: "default",
+      token: "token",
+      runtime: {} as import("../../runtime.js").RuntimeEnv,
+      botUserId: "openclaw-bot",
+      guildHistories: new Map(),
+      historyLimit: 0,
+      mediaMaxBytes: 1_000_000,
+      textLimit: 2_000,
+      replyToMode: "all",
+      dmEnabled: true,
+      groupDmEnabled: true,
+      ackReactionScope: "direct",
+      groupPolicy: "open",
+      threadBindings: createNoopThreadBindingManager("default"),
+      data: {
+        channel_id: channelId,
+        guild_id: "guild-1",
+        guild: {
+          id: "guild-1",
+          name: "Guild One",
+        },
+        author: undefined,
+        message,
+      } as unknown as import("./listeners.js").DiscordMessageEvent,
+      client,
+    });
+
+    expect(result).toBeNull();
+    expect(debugLogs).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "[discord-raw] event=MESSAGE_CREATE stage=preflight-received messageId=m-raw-log-1 channelId=channel-raw-log-1 guildId=guild-1 authorId=relay-app-1 authorBot=true webhookId=wh-raw-1 applicationId=app-raw-1 type=0 content=empty mentions=openclaw-bot authorPresent=yes",
+        ),
+      ]),
+    );
+    expect(
+      debugLogs.some(
+        (line) => line.includes("stage=preflight-drop") && line.includes("m-raw-log-1"),
+      ),
+    ).toBe(false);
+  });
+
+  it("falls back to message.author when event author is missing", async () => {
+    const channelId = "channel-author-fallback-1";
+    const client = {
+      fetchChannel: async (id: string) => {
+        if (id === channelId) {
+          return {
+            id: channelId,
+            type: ChannelType.GuildText,
+            name: "general",
+          };
+        }
+        return null;
+      },
+    } as unknown as import("@buape/carbon").Client;
+
+    const message = {
+      id: "m-author-fallback-1",
+      content: "<@openclaw-bot> status?",
+      timestamp: new Date().toISOString(),
+      channelId,
+      attachments: [],
+      mentions: {
+        users: [{ id: "openclaw-bot" }],
+      },
+      mentionedUsers: undefined,
+      mentionedRoles: [],
+      mentionedEveryone: false,
+      author: {
+        id: "relay-app-2",
+        bot: true,
+        username: "Relay",
+      },
+      webhook_id: "wh-app-2",
+      application_id: "app-2",
+      rawData: {
+        webhook_id: "wh-app-2",
+        application_id: "app-2",
+      },
+    } as unknown as import("@buape/carbon").Message;
+
+    const result = await preflightDiscordMessage({
+      cfg: {
+        session: {
+          mainKey: "main",
+          scope: "per-sender",
+        },
+      } as import("../../config/config.js").OpenClawConfig,
+      discordConfig: {
+        allowBots: true,
+      } as NonNullable<import("../../config/config.js").OpenClawConfig["channels"]>["discord"],
+      accountId: "default",
+      token: "token",
+      runtime: {} as import("../../runtime.js").RuntimeEnv,
+      botUserId: "openclaw-bot",
+      guildHistories: new Map(),
+      historyLimit: 0,
+      mediaMaxBytes: 1_000_000,
+      textLimit: 2_000,
+      replyToMode: "all",
+      dmEnabled: true,
+      groupDmEnabled: true,
+      ackReactionScope: "direct",
+      groupPolicy: "open",
+      threadBindings: createNoopThreadBindingManager("default"),
+      data: {
+        channel_id: channelId,
+        guild_id: "guild-1",
+        guild: {
+          id: "guild-1",
+          name: "Guild One",
+        },
+        author: undefined,
+        message,
+      } as unknown as import("./listeners.js").DiscordMessageEvent,
+      client,
+    });
+
+    expect(result).not.toBeNull();
+    expect(result?.author.id).toBe("relay-app-2");
+  });
 });
 
 describe("shouldIgnoreBoundThreadWebhookMessage", () => {

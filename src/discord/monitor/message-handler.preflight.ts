@@ -104,6 +104,79 @@ export function shouldIgnoreBoundThreadWebhookMessage(params: {
   return webhookId === boundWebhookId;
 }
 
+const DISCORD_RAW_LOG_PREFIX = "[discord-raw]";
+
+function stringifyDiscordRawField(value: unknown): string {
+  if (typeof value === "string" || typeof value === "number" || typeof value === "boolean") {
+    return String(value);
+  }
+  return "unknown";
+}
+
+function resolveDiscordRawMentionUserIds(message: import("@buape/carbon").Message): string[] {
+  const rawMentions = (message as { mentions?: { users?: Array<{ id?: string | null }> | null } })
+    .mentions;
+  const users =
+    message.mentionedUsers ??
+    (Array.isArray(rawMentions?.users)
+      ? rawMentions.users.filter((user): user is User => Boolean(user?.id))
+      : []);
+  return users.map((user) => user.id).filter(Boolean);
+}
+
+function logDiscordRawPreflightStage(params: {
+  stage: "preflight-received" | "preflight-drop";
+  data: DiscordMessagePreflightParams["data"];
+  reason?: string;
+}) {
+  const message = params.data.message;
+  const rawMessage = message as {
+    webhookId?: string | null;
+    webhook_id?: string | null;
+    applicationId?: string | null;
+    application_id?: string | null;
+    rawData?: Record<string, unknown> | undefined;
+    author?: { id?: string | null; bot?: boolean | null } | null;
+    content?: string | null;
+    type?: unknown;
+  };
+  const rawData = rawMessage.rawData ?? {};
+  const author = params.data.author ?? rawMessage.author ?? null;
+  const rawAuthor =
+    (rawData["author"] as { id?: string | null; bot?: boolean | null } | undefined) ?? undefined;
+  const webhookId =
+    rawMessage.webhookId ??
+    rawMessage.webhook_id ??
+    (typeof rawData["webhook_id"] === "string" ? rawData["webhook_id"] : null) ??
+    "none";
+  const applicationId =
+    rawMessage.applicationId ??
+    rawMessage.application_id ??
+    (typeof rawData["application_id"] === "string" ? rawData["application_id"] : null) ??
+    "none";
+  const mentions = resolveDiscordRawMentionUserIds(message);
+  const parts = [
+    DISCORD_RAW_LOG_PREFIX,
+    `event=MESSAGE_CREATE`,
+    `stage=${params.stage}`,
+    `messageId=${message.id ?? "unknown"}`,
+    `channelId=${params.data.channel_id ?? "unknown"}`,
+    `guildId=${params.data.guild_id ?? "dm"}`,
+    `authorId=${author?.id ?? rawAuthor?.id ?? "none"}`,
+    `authorBot=${author?.bot ?? rawAuthor?.bot ?? "unknown"}`,
+    `webhookId=${webhookId}`,
+    `applicationId=${applicationId}`,
+    `type=${stringifyDiscordRawField(rawMessage.type)}`,
+    `content=${typeof rawMessage.content === "string" && rawMessage.content.trim() ? "present" : "empty"}`,
+    `mentions=${mentions.join(",") || "none"}`,
+    `authorPresent=${author ? "yes" : "no"}`,
+  ];
+  if (params.reason) {
+    parts.push(`reason=${params.reason}`);
+  }
+  logDebug(parts.join(" "));
+}
+
 function logDiscordBotPreflightDecision(params: {
   stage: "received" | "decision";
   messageId: string;
@@ -151,8 +224,15 @@ export async function preflightDiscordMessage(
 ): Promise<DiscordMessagePreflightContext | null> {
   const logger = getChildLogger({ module: "discord-auto-reply" });
   const message = params.data.message;
-  const author = params.data.author;
+  logDiscordRawPreflightStage({ stage: "preflight-received", data: params.data });
+  const messageAuthor = (message as { author?: User | null }).author ?? null;
+  const author = params.data.author ?? messageAuthor;
   if (!author) {
+    logDiscordRawPreflightStage({
+      stage: "preflight-drop",
+      data: params.data,
+      reason: "missing-author",
+    });
     return null;
   }
   const messageChannelId = resolveDiscordMessageChannelId({
