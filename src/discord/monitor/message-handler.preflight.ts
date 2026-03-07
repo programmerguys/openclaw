@@ -104,6 +104,48 @@ export function shouldIgnoreBoundThreadWebhookMessage(params: {
   return webhookId === boundWebhookId;
 }
 
+function logDiscordBotPreflightDecision(params: {
+  stage: "received" | "decision";
+  messageId: string;
+  authorId: string;
+  authorBot: boolean;
+  channelId: string;
+  guildId?: string;
+  botUserId?: string;
+  allowBots: boolean;
+  requireMention?: boolean;
+  mentionedUserIds?: string[];
+  mentionedUsersSource?: "message.mentionedUsers" | "message.mentions.users" | "none";
+  explicitlyMentioned?: boolean;
+  hasAnyMention?: boolean;
+  decision?: "allow" | "drop";
+  dropReason?: "self-bot" | "allowBots=false" | "no-mention" | "other";
+}) {
+  if (!params.authorBot) {
+    return;
+  }
+  const parts = [
+    `[discord-preflight-bot] stage=${params.stage}`,
+    `messageId=${params.messageId}`,
+    `authorId=${params.authorId}`,
+    `authorBot=${params.authorBot}`,
+    `channelId=${params.channelId}`,
+    `guildId=${params.guildId ?? "dm"}`,
+    `botUserId=${params.botUserId ?? "unknown"}`,
+    `allowBots=${params.allowBots}`,
+    `requireMention=${params.requireMention ?? "unknown"}`,
+    `mentionedUsersSource=${params.mentionedUsersSource ?? "none"}`,
+    `mentionedUsers=${(params.mentionedUserIds ?? []).join(",") || "none"}`,
+    `explicitlyMentioned=${params.explicitlyMentioned ?? "unknown"}`,
+    `hasAnyMention=${params.hasAnyMention ?? "unknown"}`,
+  ];
+  if (params.stage === "decision") {
+    parts.push(`decision=${params.decision ?? "unknown"}`);
+    parts.push(`dropReason=${params.dropReason ?? "none"}`);
+  }
+  logDebug(parts.join(" "));
+}
+
 export async function preflightDiscordMessage(
   params: DiscordMessagePreflightParams,
 ): Promise<DiscordMessagePreflightContext | null> {
@@ -123,8 +165,32 @@ export async function preflightDiscordMessage(
   }
 
   const allowBots = params.discordConfig?.allowBots ?? false;
+  if (author.bot) {
+    logDiscordBotPreflightDecision({
+      stage: "received",
+      messageId: message.id,
+      authorId: author.id,
+      authorBot: author.bot,
+      channelId: messageChannelId,
+      guildId: params.data.guild_id ?? undefined,
+      botUserId: params.botUserId,
+      allowBots,
+    });
+  }
   if (params.botUserId && author.id === params.botUserId) {
     // Always ignore own messages to prevent self-reply loops
+    logDiscordBotPreflightDecision({
+      stage: "decision",
+      messageId: message.id,
+      authorId: author.id,
+      authorBot: author.bot,
+      channelId: messageChannelId,
+      guildId: params.data.guild_id ?? undefined,
+      botUserId: params.botUserId,
+      allowBots,
+      decision: "drop",
+      dropReason: "self-bot",
+    });
     return null;
   }
 
@@ -150,6 +216,18 @@ export async function preflightDiscordMessage(
 
   if (author.bot) {
     if (!allowBots && !sender.isPluralKit) {
+      logDiscordBotPreflightDecision({
+        stage: "decision",
+        messageId: message.id,
+        authorId: author.id,
+        authorBot: author.bot,
+        channelId: messageChannelId,
+        guildId: params.data.guild_id ?? undefined,
+        botUserId: params.botUserId,
+        allowBots,
+        decision: "drop",
+        dropReason: "allowBots=false",
+      });
       logVerbose("discord: drop bot message (allowBots=false)");
       return null;
     }
@@ -248,6 +326,11 @@ export async function preflightDiscordMessage(
   });
   const rawMentions = (message as { mentions?: { users?: Array<{ id?: string | null }> | null } })
     .mentions;
+  const mentionedUsersSource = Array.isArray(message.mentionedUsers)
+    ? "message.mentionedUsers"
+    : Array.isArray(rawMentions?.users)
+      ? "message.mentions.users"
+      : "none";
   const mentionedUsers =
     message.mentionedUsers ??
     (Array.isArray(rawMentions?.users)
@@ -605,6 +688,23 @@ export async function preflightDiscordMessage(
   );
   if (isGuildMessage && shouldRequireMention) {
     if (botId && mentionGate.shouldSkip) {
+      logDiscordBotPreflightDecision({
+        stage: "decision",
+        messageId: message.id,
+        authorId: author.id,
+        authorBot: author.bot,
+        channelId: messageChannelId,
+        guildId: params.data.guild_id ?? undefined,
+        botUserId: params.botUserId,
+        allowBots,
+        requireMention: shouldRequireMention,
+        mentionedUserIds: mentionedUsers.map((user) => user.id),
+        mentionedUsersSource,
+        explicitlyMentioned,
+        hasAnyMention,
+        decision: "drop",
+        dropReason: "no-mention",
+      });
       logDebug(`[discord-preflight] drop: no-mention`);
       logVerbose(`discord: drop guild message (mention required, botId=${botId})`);
       logger.info(
@@ -647,10 +747,45 @@ export async function preflightDiscordMessage(
   }
 
   if (!messageText) {
+    logDiscordBotPreflightDecision({
+      stage: "decision",
+      messageId: message.id,
+      authorId: author.id,
+      authorBot: author.bot,
+      channelId: messageChannelId,
+      guildId: params.data.guild_id ?? undefined,
+      botUserId: params.botUserId,
+      allowBots,
+      requireMention: shouldRequireMention,
+      mentionedUserIds: mentionedUsers.map((user) => user.id),
+      mentionedUsersSource,
+      explicitlyMentioned,
+      hasAnyMention,
+      decision: "drop",
+      dropReason: "other",
+    });
     logDebug(`[discord-preflight] drop: empty content`);
     logVerbose(`discord: drop message ${message.id} (empty content)`);
     return null;
   }
+
+  logDiscordBotPreflightDecision({
+    stage: "decision",
+    messageId: message.id,
+    authorId: author.id,
+    authorBot: author.bot,
+    channelId: messageChannelId,
+    guildId: params.data.guild_id ?? undefined,
+    botUserId: params.botUserId,
+    allowBots,
+    requireMention: shouldRequireMention,
+    mentionedUserIds: mentionedUsers.map((user) => user.id),
+    mentionedUsersSource,
+    explicitlyMentioned,
+    hasAnyMention,
+    decision: "allow",
+    dropReason: "none",
+  });
 
   logDebug(
     `[discord-preflight] success: route=${effectiveRoute.agentId} sessionKey=${effectiveRoute.sessionKey}`,

@@ -1,7 +1,21 @@
 import { ChannelType } from "@buape/carbon";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
+const { debugLogs, logDebugMock } = vi.hoisted(() => ({
+  debugLogs: [] as string[],
+  logDebugMock: vi.fn((message: string) => {
+    debugLogs.push(String(message));
+  }),
+}));
 const transcribeFirstAudioMock = vi.hoisted(() => vi.fn());
+
+vi.mock("../../logger.js", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../../logger.js")>();
+  return {
+    ...actual,
+    logDebug: (message: string) => logDebugMock(message),
+  };
+});
 
 vi.mock("../../media-understanding/audio-preflight.js", () => ({
   transcribeFirstAudio: (...args: unknown[]) => transcribeFirstAudioMock(...args),
@@ -81,6 +95,8 @@ describe("preflightDiscordMessage", () => {
   beforeEach(() => {
     sessionBindingTesting.resetSessionBindingAdaptersForTests();
     transcribeFirstAudioMock.mockReset();
+    debugLogs.length = 0;
+    logDebugMock.mockClear();
   });
 
   it("bypasses mention gating in bound threads for allowed bot senders", async () => {
@@ -247,6 +263,148 @@ describe("preflightDiscordMessage", () => {
     expect(result).not.toBeNull();
     expect(result?.wasMentioned).toBe(true);
     expect(result?.effectiveWasMentioned).toBe(true);
+  });
+
+  it("emits grep-friendly bot preflight logs for allow/drop decisions", async () => {
+    const channelId = "channel-bot-log-1";
+    const client = {
+      fetchChannel: async (id: string) => {
+        if (id === channelId) {
+          return {
+            id: channelId,
+            type: ChannelType.GuildText,
+            name: "general",
+          };
+        }
+        return null;
+      },
+    } as unknown as import("@buape/carbon").Client;
+
+    const mentionedMessage = {
+      id: "m-bot-log-allow",
+      content: "<@openclaw-bot> status?",
+      timestamp: new Date().toISOString(),
+      channelId,
+      attachments: [],
+      mentions: {
+        users: [{ id: "openclaw-bot" }],
+      },
+      mentionedUsers: undefined,
+      mentionedRoles: [],
+      mentionedEveryone: false,
+      author: {
+        id: "relay-bot-logs",
+        bot: true,
+        username: "Relay",
+      },
+    } as unknown as import("@buape/carbon").Message;
+
+    const droppedMessage = {
+      id: "m-bot-log-drop",
+      content: "status?",
+      timestamp: new Date().toISOString(),
+      channelId,
+      attachments: [],
+      mentions: {
+        users: [],
+      },
+      mentionedUsers: undefined,
+      mentionedRoles: [],
+      mentionedEveryone: false,
+      author: {
+        id: "relay-bot-logs",
+        bot: true,
+        username: "Relay",
+      },
+    } as unknown as import("@buape/carbon").Message;
+
+    await preflightDiscordMessage({
+      cfg: {
+        session: {
+          mainKey: "main",
+          scope: "per-sender",
+        },
+      } as import("../../config/config.js").OpenClawConfig,
+      discordConfig: {
+        allowBots: true,
+      } as NonNullable<import("../../config/config.js").OpenClawConfig["channels"]>["discord"],
+      accountId: "default",
+      token: "token",
+      runtime: {} as import("../../runtime.js").RuntimeEnv,
+      botUserId: "openclaw-bot",
+      guildHistories: new Map(),
+      historyLimit: 0,
+      mediaMaxBytes: 1_000_000,
+      textLimit: 2_000,
+      replyToMode: "all",
+      dmEnabled: true,
+      groupDmEnabled: true,
+      ackReactionScope: "direct",
+      groupPolicy: "open",
+      threadBindings: createNoopThreadBindingManager("default"),
+      data: {
+        channel_id: channelId,
+        guild_id: "guild-1",
+        guild: {
+          id: "guild-1",
+          name: "Guild One",
+        },
+        author: mentionedMessage.author,
+        message: mentionedMessage,
+      } as unknown as import("./listeners.js").DiscordMessageEvent,
+      client,
+    });
+
+    await preflightDiscordMessage({
+      cfg: {
+        session: {
+          mainKey: "main",
+          scope: "per-sender",
+        },
+      } as import("../../config/config.js").OpenClawConfig,
+      discordConfig: {
+        allowBots: true,
+      } as NonNullable<import("../../config/config.js").OpenClawConfig["channels"]>["discord"],
+      accountId: "default",
+      token: "token",
+      runtime: {} as import("../../runtime.js").RuntimeEnv,
+      botUserId: "openclaw-bot",
+      guildHistories: new Map(),
+      historyLimit: 0,
+      mediaMaxBytes: 1_000_000,
+      textLimit: 2_000,
+      replyToMode: "all",
+      dmEnabled: true,
+      groupDmEnabled: true,
+      ackReactionScope: "direct",
+      groupPolicy: "open",
+      threadBindings: createNoopThreadBindingManager("default"),
+      data: {
+        channel_id: channelId,
+        guild_id: "guild-1",
+        guild: {
+          id: "guild-1",
+          name: "Guild One",
+        },
+        author: droppedMessage.author,
+        message: droppedMessage,
+      } as unknown as import("./listeners.js").DiscordMessageEvent,
+      client,
+    });
+
+    expect(debugLogs).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining(
+          "[discord-preflight-bot] stage=received messageId=m-bot-log-allow authorId=relay-bot-logs authorBot=true channelId=channel-bot-log-1 guildId=guild-1 botUserId=openclaw-bot allowBots=true requireMention=unknown mentionedUsersSource=none mentionedUsers=none explicitlyMentioned=unknown hasAnyMention=unknown",
+        ),
+        expect.stringContaining(
+          "[discord-preflight-bot] stage=decision messageId=m-bot-log-allow authorId=relay-bot-logs authorBot=true channelId=channel-bot-log-1 guildId=guild-1 botUserId=openclaw-bot allowBots=true requireMention=true mentionedUsersSource=message.mentions.users mentionedUsers=openclaw-bot explicitlyMentioned=true hasAnyMention=true decision=allow dropReason=none",
+        ),
+        expect.stringContaining(
+          "[discord-preflight-bot] stage=decision messageId=m-bot-log-drop authorId=relay-bot-logs authorBot=true channelId=channel-bot-log-1 guildId=guild-1 botUserId=openclaw-bot allowBots=true requireMention=true mentionedUsersSource=message.mentions.users mentionedUsers=none explicitlyMentioned=false hasAnyMention=false decision=drop dropReason=no-mention",
+        ),
+      ]),
+    );
   });
 
   it("still drops bot-authored guild messages without mentions when allowBots is enabled", async () => {
