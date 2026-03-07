@@ -246,6 +246,13 @@ export async function preflightDiscordMessage(
   const messageText = resolveDiscordMessageText(message, {
     includeForwarded: true,
   });
+  const rawMentions = (message as { mentions?: { users?: Array<{ id?: string | null }> | null } })
+    .mentions;
+  const mentionedUsers =
+    message.mentionedUsers ??
+    (Array.isArray(rawMentions?.users)
+      ? rawMentions.users.filter((user): user is User => Boolean(user?.id))
+      : []);
   recordChannelActivity({
     channel: "discord",
     accountId: params.accountId,
@@ -326,12 +333,12 @@ export async function preflightDiscordMessage(
     : route;
   const mentionRegexes = buildMentionRegexes(params.cfg, effectiveRoute.agentId);
   const explicitlyMentioned = Boolean(
-    botId && message.mentionedUsers?.some((user: User) => user.id === botId),
+    botId && mentionedUsers.some((user: User) => user.id === botId),
   );
   const hasAnyMention = Boolean(
     !isDirectMessage &&
     (message.mentionedEveryone ||
-      (message.mentionedUsers?.length ?? 0) > 0 ||
+      mentionedUsers.length > 0 ||
       (message.mentionedRoles?.length ?? 0) > 0),
   );
 
