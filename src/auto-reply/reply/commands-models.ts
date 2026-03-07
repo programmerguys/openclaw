@@ -3,7 +3,6 @@ import { DEFAULT_MODEL, DEFAULT_PROVIDER } from "../../agents/defaults.js";
 import { resolveModelAuthLabel } from "../../agents/model-auth-label.js";
 import { loadModelCatalog } from "../../agents/model-catalog.js";
 import {
-  buildAllowedModelSet,
   buildModelAliasIndex,
   normalizeProviderId,
   resolveConfiguredModelRef,
@@ -43,13 +42,6 @@ export async function buildModelsProviderData(cfg: OpenClawConfig): Promise<Mode
   });
 
   const catalog = await loadModelCatalog({ config: cfg });
-  const allowed = buildAllowedModelSet({
-    cfg,
-    catalog,
-    defaultProvider: resolvedDefault.provider,
-    defaultModel: resolvedDefault.model,
-  });
-
   const aliasIndex = buildModelAliasIndex({
     cfg,
     defaultProvider: resolvedDefault.provider,
@@ -101,17 +93,17 @@ export async function buildModelsProviderData(cfg: OpenClawConfig): Promise<Mode
     }
   };
 
-  for (const entry of allowed.allowedCatalog) {
+  for (const entry of catalog) {
     add(entry.provider, entry.id);
   }
 
-  // Include config-only allowlist keys that aren't in the curated catalog.
+  // Include config-only model keys that aren't in the runtime catalog yet.
   for (const raw of Object.keys(cfg.agents?.defaults?.models ?? {})) {
     addRawModelRef(raw);
   }
 
   // Ensure configured defaults/fallbacks/image models show up even when the
-  // curated catalog doesn't know about them (custom providers, dev builds, etc.).
+  // runtime catalog doesn't know about them (custom providers, dev builds, etc.).
   add(resolvedDefault.provider, resolvedDefault.model);
   addModelConfigEntries();
 

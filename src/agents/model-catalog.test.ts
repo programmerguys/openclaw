@@ -1,4 +1,7 @@
-import { describe, expect, it, vi } from "vitest";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import type { OpenClawConfig } from "../config/config.js";
 import { resetLogger, setLoggerOverride } from "../logging/logger.js";
 import { __setModelCatalogImportForTest, loadModelCatalog } from "./model-catalog.js";
@@ -27,8 +30,22 @@ function mockSingleOpenAiCatalogModel() {
   mockPiDiscoveryModels([{ id: "gpt-4.1", provider: "openai", name: "GPT-4.1" }]);
 }
 
+async function writeCodexModelsCache(codexHome: string, models: unknown[]) {
+  await fs.mkdir(codexHome, { recursive: true });
+  const cachePath = path.join(codexHome, "models_cache.json");
+  await fs.writeFile(
+    cachePath,
+    `${JSON.stringify({ fetched_at: "2026-03-06T12:21:36.994550Z", client_version: "0.111.0", models }, null, 2)}\n`,
+    "utf8",
+  );
+  return cachePath;
+}
+
 describe("loadModelCatalog", () => {
   installModelCatalogTestHooks();
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
 
   it("retries after import failure without poisoning the cache", async () => {
     setLoggerOverride({ level: "silent", consoleLevel: "warn" });
@@ -112,6 +129,131 @@ describe("loadModelCatalog", () => {
     const spark = result.find((entry) => entry.id === "gpt-5.3-codex-spark");
     expect(spark?.name).toBe("gpt-5.3-codex-spark");
     expect(spark?.reasoning).toBe(true);
+  });
+
+  it("adds openai-codex/gpt-5.4 when a lower codex base model exists", async () => {
+    mockPiDiscoveryModels([
+      {
+        id: "gpt-5.3-codex",
+        provider: "openai-codex",
+        name: "GPT-5.3 Codex",
+        reasoning: true,
+        contextWindow: 200000,
+        input: ["text"],
+      },
+      {
+        id: "gpt-5.2-codex",
+        provider: "openai-codex",
+        name: "GPT-5.2 Codex",
+      },
+    ]);
+
+    const result = await loadModelCatalog({ config: {} as OpenClawConfig });
+    expect(result).toContainEqual(
+      expect.objectContaining({
+        provider: "openai-codex",
+        id: "gpt-5.4",
+      }),
+    );
+    const gpt54 = result.find((entry) => entry.id === "gpt-5.4");
+    expect(gpt54?.name).toBe("gpt-5.4");
+    expect(gpt54?.reasoning).toBe(true);
+  });
+
+  it("merges visible openai-codex models from the local Codex CLI cache", async () => {
+    const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-codex-home-"));
+    vi.stubEnv("CODEX_HOME", codexHome);
+    try {
+      await writeCodexModelsCache(codexHome, [
+        {
+          slug: "gpt-5.4",
+          display_name: "GPT-5.4",
+          visibility: "list",
+          supported_reasoning_levels: [{ effort: "low" }, { effort: "xhigh" }],
+          input_modalities: ["text", "image"],
+          context_window: 272000,
+        },
+        {
+          slug: "gpt-5.1-codex",
+          display_name: "gpt-5.1-codex",
+          visibility: "hide",
+          supported_reasoning_levels: [{ effort: "low" }],
+          input_modalities: ["text"],
+          context_window: 200000,
+        },
+      ]);
+      mockPiDiscoveryModels([
+        {
+          id: "gpt-5.3-codex",
+          provider: "openai-codex",
+          name: "GPT-5.3 Codex",
+          reasoning: true,
+          contextWindow: 200000,
+          input: ["text"],
+        },
+      ]);
+
+      const result = await loadModelCatalog({ config: {} as OpenClawConfig });
+      expect(result).toContainEqual(
+        expect.objectContaining({
+          provider: "openai-codex",
+          id: "gpt-5.4",
+          name: "GPT-5.4",
+          reasoning: true,
+          contextWindow: 272000,
+          input: ["text", "image"],
+        }),
+      );
+      expect(
+        result.some((entry) => entry.provider === "openai-codex" && entry.id === "gpt-5.1-codex"),
+      ).toBe(false);
+    } finally {
+      await fs.rm(codexHome, { recursive: true, force: true });
+    }
+  });
+
+  it("refreshes the cached catalog when the Codex CLI models cache changes", async () => {
+    const codexHome = await fs.mkdtemp(path.join(os.tmpdir(), "openclaw-codex-home-"));
+    vi.stubEnv("CODEX_HOME", codexHome);
+    try {
+      const cachePath = await writeCodexModelsCache(codexHome, [
+        {
+          slug: "gpt-5.3-codex",
+          display_name: "gpt-5.3-codex",
+          visibility: "list",
+          supported_reasoning_levels: [{ effort: "medium" }],
+          input_modalities: ["text", "image"],
+        },
+      ]);
+      mockPiDiscoveryModels([]);
+
+      const first = await loadModelCatalog({ config: {} as OpenClawConfig });
+      expect(first.some((entry) => entry.id === "gpt-5.1-codex-mini")).toBe(false);
+
+      await writeCodexModelsCache(codexHome, [
+        {
+          slug: "gpt-5.3-codex",
+          display_name: "gpt-5.3-codex",
+          visibility: "list",
+          supported_reasoning_levels: [{ effort: "medium" }],
+          input_modalities: ["text", "image"],
+        },
+        {
+          slug: "gpt-5.1-codex-mini",
+          display_name: "gpt-5.1-codex-mini",
+          visibility: "list",
+          supported_reasoning_levels: [{ effort: "medium" }],
+          input_modalities: ["text"],
+        },
+      ]);
+      const bumped = new Date(Date.now() + 2000);
+      await fs.utimes(cachePath, bumped, bumped);
+
+      const second = await loadModelCatalog({ config: {} as OpenClawConfig });
+      expect(second.some((entry) => entry.id === "gpt-5.1-codex-mini")).toBe(true);
+    } finally {
+      await fs.rm(codexHome, { recursive: true, force: true });
+    }
   });
 
   it("merges configured models for opted-in non-pi-native providers", async () => {

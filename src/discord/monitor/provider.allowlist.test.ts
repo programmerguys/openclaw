@@ -59,6 +59,44 @@ describe("resolveDiscordAllowlistConfig", () => {
     expect(resolveDiscordUserAllowlistMock).toHaveBeenCalledTimes(2);
   });
 
+  it("preserves channel overrides when resolving guild/channel names to ids", async () => {
+    resolveDiscordChannelAllowlistMock.mockResolvedValueOnce([
+      {
+        input: "Guild One/bot-ring",
+        resolved: true,
+        guildId: "145",
+        guildName: "Guild One",
+        channelId: "404",
+        channelName: "bot-ring",
+      },
+    ]);
+    const runtime = { log: vi.fn(), error: vi.fn(), exit: vi.fn() } as unknown as RuntimeEnv;
+
+    const result = await resolveDiscordAllowlistConfig({
+      token: "token",
+      allowFrom: [],
+      guildEntries: {
+        "Guild One": {
+          requireMention: true,
+          channels: {
+            "bot-ring": {
+              allow: true,
+              requireMention: false,
+            },
+          },
+        },
+      },
+      fetcher: vi.fn() as unknown as typeof fetch,
+      runtime,
+    });
+
+    expect(result.guildEntries?.["145"]?.requireMention).toBe(true);
+    expect(result.guildEntries?.["145"]?.channels?.["404"]).toEqual({
+      allow: true,
+      requireMention: false,
+    });
+  });
+
   it("logs discord name metadata for resolved and unresolved allowlist entries", async () => {
     resolveDiscordChannelAllowlistMock.mockResolvedValueOnce([
       {

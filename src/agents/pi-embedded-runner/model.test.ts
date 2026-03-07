@@ -235,6 +235,24 @@ describe("resolveModel", () => {
     expect(result.model).toMatchObject(buildOpenAICodexForwardCompatExpectation("gpt-5.3-codex"));
   });
 
+  it("builds an openai-codex fallback for gpt-5.4-codex", () => {
+    mockOpenAICodexTemplateModel();
+
+    const result = resolveModel("openai-codex", "gpt-5.4-codex", "/tmp/agent");
+
+    expect(result.error).toBeUndefined();
+    expect(result.model).toMatchObject(buildOpenAICodexForwardCompatExpectation("gpt-5.4"));
+  });
+
+  it("builds an openai-codex fallback for gpt-5.4", () => {
+    mockOpenAICodexTemplateModel();
+
+    const result = resolveModel("openai-codex", "gpt-5.4", "/tmp/agent");
+
+    expect(result.error).toBeUndefined();
+    expect(result.model).toMatchObject(buildOpenAICodexForwardCompatExpectation("gpt-5.4"));
+  });
+
   it("builds an anthropic forward-compat fallback for claude-opus-4-6", () => {
     mockDiscoveredModel({
       provider: "anthropic",
@@ -352,6 +370,63 @@ describe("resolveModel", () => {
         id: "gpt-5.3-codex",
         provider: "openai-codex",
       },
+    });
+  });
+
+  it("uses codex fallback for gpt-5.4-codex even when openai-codex provider is configured", () => {
+    const cfg: OpenClawConfig = {
+      models: {
+        providers: {
+          "openai-codex": {
+            baseUrl: "https://custom.example.com",
+          },
+        },
+      },
+    } as unknown as OpenClawConfig;
+
+    expectResolvedForwardCompatFallback({
+      provider: "openai-codex",
+      id: "gpt-5.4-codex",
+      cfg,
+      expectedModel: {
+        api: "openai-codex-responses",
+        id: "gpt-5.4",
+        provider: "openai-codex",
+      },
+    });
+  });
+
+  it("reuses configured gpt-5.4 metadata for legacy gpt-5.4-codex refs", () => {
+    const cfg: OpenClawConfig = {
+      models: {
+        providers: {
+          "openai-codex": {
+            baseUrl: "https://custom.example.com",
+            api: "openai-completions",
+            models: [
+              {
+                id: "gpt-5.4",
+                name: "Configured GPT-5.4",
+                reasoning: false,
+                input: ["text"],
+              },
+            ],
+          },
+        },
+      },
+    } as unknown as OpenClawConfig;
+
+    const result = resolveModel("openai-codex", "gpt-5.4-codex", "/tmp/agent", cfg);
+
+    expect(result.error).toBeUndefined();
+    expect(result.model).toMatchObject({
+      id: "gpt-5.4",
+      name: "Configured GPT-5.4",
+      provider: "openai-codex",
+      api: "openai-completions",
+      baseUrl: "https://custom.example.com",
+      reasoning: false,
+      input: ["text"],
     });
   });
 

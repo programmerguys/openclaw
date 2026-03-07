@@ -1,3 +1,5 @@
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import { formatCliCommand } from "./command-format.js";
@@ -79,6 +81,32 @@ describe("applyCliProfileEnv", () => {
     expect(env.OPENCLAW_STATE_DIR).toBe("/custom");
     expect(env.OPENCLAW_GATEWAY_PORT).toBe("19099");
     expect(env.OPENCLAW_CONFIG_PATH).toBe(path.join("/custom", "openclaw.json"));
+  });
+
+  it("uses gateway.port from the dev profile config when present", () => {
+    const tempRoot = fs.mkdtempSync(path.join(os.tmpdir(), "openclaw-profile-test-"));
+    try {
+      const stateDir = path.join(tempRoot, ".openclaw-dev");
+      fs.mkdirSync(stateDir, { recursive: true });
+      fs.writeFileSync(
+        path.join(stateDir, "openclaw.json"),
+        JSON.stringify({ gateway: { port: 19789 } }),
+        "utf8",
+      );
+
+      const env: Record<string, string | undefined> = {};
+      applyCliProfileEnv({
+        profile: "dev",
+        env,
+        homedir: () => tempRoot,
+      });
+
+      expect(env.OPENCLAW_STATE_DIR).toBe(stateDir);
+      expect(env.OPENCLAW_CONFIG_PATH).toBe(path.join(stateDir, "openclaw.json"));
+      expect(env.OPENCLAW_GATEWAY_PORT).toBe("19789");
+    } finally {
+      fs.rmSync(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("uses OPENCLAW_HOME when deriving profile state dir", () => {

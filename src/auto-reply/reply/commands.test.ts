@@ -41,6 +41,7 @@ vi.mock("../../config/config.js", async () => {
 const readChannelAllowFromStoreMock = vi.hoisted(() => vi.fn());
 const addChannelAllowFromStoreEntryMock = vi.hoisted(() => vi.fn());
 const removeChannelAllowFromStoreEntryMock = vi.hoisted(() => vi.fn());
+const loadModelCatalogMock = vi.hoisted(() => vi.fn());
 
 vi.mock("../../pairing/pairing-store.js", async () => {
   const actual = await vi.importActual<typeof import("../../pairing/pairing-store.js")>(
@@ -65,13 +66,7 @@ vi.mock("../../channels/plugins/pairing.js", async () => {
 });
 
 vi.mock("../../agents/model-catalog.js", () => ({
-  loadModelCatalog: vi.fn(async () => [
-    { provider: "anthropic", id: "claude-opus-4-5", name: "Claude Opus" },
-    { provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet" },
-    { provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
-    { provider: "openai", id: "gpt-4.1-mini", name: "GPT-4.1 Mini" },
-    { provider: "google", id: "gemini-2.0-flash", name: "Gemini Flash" },
-  ]),
+  loadModelCatalog: loadModelCatalogMock,
 }));
 
 vi.mock("../../agents/pi-embedded.js", () => {
@@ -135,6 +130,21 @@ afterAll(async () => {
 function buildParams(commandBody: string, cfg: OpenClawConfig, ctxOverrides?: Partial<MsgContext>) {
   return buildCommandTestParams(commandBody, cfg, ctxOverrides, { workspaceDir: testWorkspaceDir });
 }
+
+function buildDefaultModelCatalog() {
+  return [
+    { provider: "anthropic", id: "claude-opus-4-5", name: "Claude Opus" },
+    { provider: "anthropic", id: "claude-sonnet-4-5", name: "Claude Sonnet" },
+    { provider: "openai", id: "gpt-4.1", name: "GPT-4.1" },
+    { provider: "openai", id: "gpt-4.1-mini", name: "GPT-4.1 Mini" },
+    { provider: "google", id: "gemini-2.0-flash", name: "Gemini Flash" },
+  ];
+}
+
+beforeEach(() => {
+  loadModelCatalogMock.mockReset();
+  loadModelCatalogMock.mockResolvedValue(buildDefaultModelCatalog());
+});
 
 describe("handleCommands gating", () => {
   it("blocks gated commands when disabled or not elevated-allowlisted", async () => {
@@ -880,6 +890,50 @@ describe("/models command", () => {
     expect(result.reply?.text).toContain("Models (localai");
     expect(result.reply?.text).toContain("localai/ultra-chat");
     expect(result.reply?.text).not.toContain("Unknown provider");
+  });
+
+  it("lists openai-codex models when the catalog exposes them", async () => {
+    loadModelCatalogMock.mockResolvedValue([
+      { provider: "openai-codex", id: "gpt-5.1", name: "gpt-5.1" },
+      { provider: "openai-codex", id: "gpt-5.1-codex-max", name: "gpt-5.1-codex-max" },
+      { provider: "openai-codex", id: "gpt-5.1-codex-mini", name: "gpt-5.1-codex-mini" },
+      { provider: "openai-codex", id: "gpt-5.2", name: "gpt-5.2" },
+      { provider: "openai-codex", id: "gpt-5.2-codex", name: "gpt-5.2-codex" },
+      { provider: "openai-codex", id: "gpt-5.3-codex", name: "gpt-5.3-codex" },
+      { provider: "openai-codex", id: "gpt-5.4", name: "gpt-5.4" },
+      { provider: "openai-codex", id: "gpt-5.3-codex-spark", name: "gpt-5.3-codex-spark" },
+    ]);
+
+    const codexCfg = {
+      commands: { text: true },
+      agents: {
+        defaults: {
+          model: { primary: "openai-codex/gpt-5.4" },
+          models: {
+            "openai-codex/gpt-5.3-codex": { params: { serviceTier: "priority" } },
+            "openai-codex/gpt-5.4": { params: { serviceTier: "priority" } },
+          },
+        },
+      },
+    } as unknown as OpenClawConfig;
+
+    const result = await handleCommands(
+      buildPolicyParams("/models openai-codex all", codexCfg, {
+        Provider: "discord",
+        Surface: "discord",
+      }),
+    );
+
+    expect(result.shouldContinue).toBe(false);
+    expect(result.reply?.text).toContain("Models (openai-codex");
+    expect(result.reply?.text).toContain("openai-codex/gpt-5.1");
+    expect(result.reply?.text).toContain("openai-codex/gpt-5.1-codex-max");
+    expect(result.reply?.text).toContain("openai-codex/gpt-5.1-codex-mini");
+    expect(result.reply?.text).toContain("openai-codex/gpt-5.2");
+    expect(result.reply?.text).toContain("openai-codex/gpt-5.2-codex");
+    expect(result.reply?.text).toContain("openai-codex/gpt-5.4");
+    expect(result.reply?.text).toContain("openai-codex/gpt-5.3-codex");
+    expect(result.reply?.text).toContain("openai-codex/gpt-5.3-codex-spark");
   });
 });
 

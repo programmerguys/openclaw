@@ -1,7 +1,8 @@
 import type { OpenClawConfig } from "../config/config.js";
 import type { AgentModelListConfig } from "../config/types.js";
+import { OPENAI_CODEX_GPT54_MODEL_ID } from "../shared/openai-codex-models.js";
 
-export const OPENAI_CODEX_DEFAULT_MODEL = "openai-codex/gpt-5.3-codex";
+export const OPENAI_CODEX_DEFAULT_MODEL = `openai-codex/${OPENAI_CODEX_GPT54_MODEL_ID}`;
 
 function shouldSetOpenAICodexModel(model?: string): boolean {
   const trimmed = model?.trim();

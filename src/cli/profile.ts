@@ -1,5 +1,7 @@
+import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import JSON5 from "json5";
 import { resolveRequiredHomeDir } from "../infra/home-dir.js";
 import { isValidProfileName } from "./profile-utils.js";
 
@@ -97,6 +99,23 @@ function resolveProfileStateDir(
   return path.join(resolveRequiredHomeDir(env as NodeJS.ProcessEnv, homedir), `.openclaw${suffix}`);
 }
 
+function resolveProfileConfigGatewayPort(configPath: string): string | null {
+  try {
+    if (!fs.existsSync(configPath)) {
+      return null;
+    }
+    const raw = fs.readFileSync(configPath, "utf8");
+    const parsed = JSON5.parse(raw);
+    const port = parsed?.gateway?.port;
+    if (typeof port === "number" && Number.isFinite(port) && port > 0) {
+      return String(port);
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 export function applyCliProfileEnv(params: {
   profile: string;
   env?: Record<string, string | undefined>;
@@ -122,6 +141,7 @@ export function applyCliProfileEnv(params: {
   }
 
   if (profile === "dev" && !env.OPENCLAW_GATEWAY_PORT?.trim()) {
-    env.OPENCLAW_GATEWAY_PORT = "19001";
+    env.OPENCLAW_GATEWAY_PORT =
+      resolveProfileConfigGatewayPort(env.OPENCLAW_CONFIG_PATH) ?? "19001";
   }
 }

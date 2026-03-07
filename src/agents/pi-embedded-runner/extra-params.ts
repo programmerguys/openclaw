@@ -3,6 +3,7 @@ import type { SimpleStreamOptions } from "@mariozechner/pi-ai";
 import { streamSimple } from "@mariozechner/pi-ai";
 import type { ThinkLevel } from "../../auto-reply/thinking.js";
 import type { OpenClawConfig } from "../../config/config.js";
+import { listOpenAICodexModelIdCandidates } from "../../shared/openai-codex-models.js";
 import { log } from "./logger.js";
 
 const OPENROUTER_APP_HEADERS: Record<string, string> = {
@@ -28,8 +29,15 @@ export function resolveExtraParams(params: {
   modelId: string;
   agentId?: string;
 }): Record<string, unknown> | undefined {
-  const modelKey = `${params.provider}/${params.modelId}`;
-  const modelConfig = params.cfg?.agents?.defaults?.models?.[modelKey];
+  const modelKeys =
+    params.provider === "openai-codex"
+      ? listOpenAICodexModelIdCandidates(params.modelId).map(
+          (modelId) => `${params.provider}/${modelId}`,
+        )
+      : [`${params.provider}/${params.modelId}`];
+  const modelConfig = modelKeys
+    .map((modelKey) => params.cfg?.agents?.defaults?.models?.[modelKey])
+    .find(Boolean);
   const globalParams = modelConfig?.params ? { ...modelConfig.params } : undefined;
   const agentParams =
     params.agentId && params.cfg?.agents?.list
@@ -47,6 +55,7 @@ type CacheRetention = "none" | "short" | "long";
 type CacheRetentionStreamOptions = Partial<SimpleStreamOptions> & {
   cacheRetention?: CacheRetention;
   openaiWsWarmup?: boolean;
+  serviceTier?: "auto" | "default" | "flex" | "priority";
 };
 
 /**
@@ -127,6 +136,15 @@ function createStreamFnWithExtraParams(
   }
   if (typeof extraParams.openaiWsWarmup === "boolean") {
     streamParams.openaiWsWarmup = extraParams.openaiWsWarmup;
+  }
+  const serviceTier = extraParams.serviceTier ?? extraParams.service_tier;
+  if (
+    serviceTier === "auto" ||
+    serviceTier === "default" ||
+    serviceTier === "flex" ||
+    serviceTier === "priority"
+  ) {
+    streamParams.serviceTier = serviceTier;
   }
   const cacheRetention = resolveCacheRetention(extraParams, provider);
   if (cacheRetention) {

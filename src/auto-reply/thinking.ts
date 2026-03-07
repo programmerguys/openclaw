@@ -1,3 +1,5 @@
+import { normalizeOpenAICodexModelId } from "../shared/openai-codex-models.js";
+
 export type ThinkLevel = "off" | "minimal" | "low" | "medium" | "high" | "xhigh" | "adaptive";
 export type VerboseLevel = "off" | "on" | "full";
 export type NoticeLevel = "off" | "on" | "full";
@@ -22,7 +24,9 @@ export function isBinaryThinkingProvider(provider?: string | null): boolean {
 }
 
 export const XHIGH_MODEL_REFS = [
+  "openai/gpt-5.4",
   "openai/gpt-5.2",
+  "openai-codex/gpt-5.4",
   "openai-codex/gpt-5.3-codex",
   "openai-codex/gpt-5.3-codex-spark",
   "openai-codex/gpt-5.2-codex",
@@ -78,11 +82,15 @@ export function normalizeThinkLevel(raw?: string | null): ThinkLevel | undefined
 }
 
 export function supportsXHighThinking(provider?: string | null, model?: string | null): boolean {
-  const modelKey = model?.trim().toLowerCase();
-  if (!modelKey) {
+  const rawModelKey = model?.trim().toLowerCase();
+  if (!rawModelKey) {
     return false;
   }
   const providerKey = provider?.trim().toLowerCase();
+  const modelKey =
+    !providerKey || providerKey === "openai-codex"
+      ? normalizeOpenAICodexModelId(rawModelKey) || rawModelKey
+      : rawModelKey;
   if (providerKey) {
     return XHIGH_MODEL_SET.has(`${providerKey}/${modelKey}`);
   }

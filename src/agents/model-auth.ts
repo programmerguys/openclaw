@@ -4,6 +4,7 @@ import { formatCliCommand } from "../cli/command-format.js";
 import type { OpenClawConfig } from "../config/config.js";
 import type { ModelProviderAuthMode, ModelProviderConfig } from "../config/types.js";
 import { getShellEnvAppliedKeys } from "../infra/shell-env.js";
+import { OPENAI_CODEX_GPT54_MODEL_ID } from "../shared/openai-codex-models.js";
 import {
   normalizeOptionalSecretInput,
   normalizeSecretInput,
@@ -216,7 +217,7 @@ export async function resolveApiKeyForProvider(params: {
     const hasCodex = listProfilesForProvider(store, "openai-codex").length > 0;
     if (hasCodex) {
       throw new Error(
-        'No API key found for provider "openai". You are authenticated with OpenAI Codex OAuth. Use openai-codex/gpt-5.3-codex (OAuth) or set OPENAI_API_KEY to use openai/gpt-5.1-codex.',
+        `No API key found for provider "openai". You are authenticated with OpenAI Codex OAuth. Use openai-codex/${OPENAI_CODEX_GPT54_MODEL_ID} (OAuth) or set OPENAI_API_KEY to use openai/gpt-5.4.`,
       );
     }
   }

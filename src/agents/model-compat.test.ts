@@ -235,6 +235,12 @@ describe("normalizeModelCompat", () => {
 });
 
 describe("isModernModelRef", () => {
+  it("keeps openai and openai-codex gpt-5.4 refs in the modern selection", () => {
+    expect(isModernModelRef({ provider: "openai", id: "gpt-5.4" })).toBe(true);
+    expect(isModernModelRef({ provider: "openai-codex", id: "gpt-5.4" })).toBe(true);
+    expect(isModernModelRef({ provider: "openai-codex", id: "gpt-5.4-codex" })).toBe(true);
+  });
+
   it("excludes opencode minimax variants from modern selection", () => {
     expect(isModernModelRef({ provider: "opencode", id: "minimax-m2.5" })).toBe(false);
     expect(isModernModelRef({ provider: "opencode", id: "minimax-m2.5" })).toBe(false);
@@ -247,6 +253,19 @@ describe("isModernModelRef", () => {
 });
 
 describe("resolveForwardCompatModel", () => {
+  it("normalizes openai-codex gpt-5.4-codex onto gpt-5.4", () => {
+    const registry = createRegistry({
+      "openai-codex/gpt-5.2-codex": {
+        ...createTemplateModel("openai-codex", "gpt-5.2-codex"),
+        api: "openai-codex-responses",
+        baseUrl: "https://chatgpt.com/backend-api",
+        input: ["text", "image"],
+      } as Model<Api>,
+    });
+    const model = resolveForwardCompatModel("openai-codex", "gpt-5.4-codex", registry);
+    expectResolvedForwardCompat(model, { provider: "openai-codex", id: "gpt-5.4" });
+  });
+
   it("resolves anthropic opus 4.6 via 4.5 template", () => {
     const registry = createRegistry({
       "anthropic/claude-opus-4-5": createTemplateModel("anthropic", "claude-opus-4-5"),

@@ -138,9 +138,22 @@ describe("resolveExtraParams", () => {
 
 describe("applyExtraParamsToAgent", () => {
   function createOptionsCaptureAgent() {
-    const calls: Array<(SimpleStreamOptions & { openaiWsWarmup?: boolean }) | undefined> = [];
+    const calls: Array<
+      | (SimpleStreamOptions & {
+          openaiWsWarmup?: boolean;
+          serviceTier?: "auto" | "default" | "flex" | "priority";
+        })
+      | undefined
+    > = [];
     const baseStreamFn: StreamFn = (_model, _context, options) => {
-      calls.push(options as (SimpleStreamOptions & { openaiWsWarmup?: boolean }) | undefined);
+      calls.push(
+        options as
+          | (SimpleStreamOptions & {
+              openaiWsWarmup?: boolean;
+              serviceTier?: "auto" | "default" | "flex" | "priority";
+            })
+          | undefined,
+      );
       return {} as ReturnType<StreamFn>;
     };
     return {
@@ -787,6 +800,66 @@ describe("applyExtraParamsToAgent", () => {
 
     expect(calls).toHaveLength(1);
     expect(calls[0]?.transport).toBe("sse");
+  });
+
+  it("passes configured serviceTier through stream options for openai-codex/gpt-5.4", () => {
+    const { calls, agent } = createOptionsCaptureAgent();
+    const cfg = {
+      agents: {
+        defaults: {
+          models: {
+            "openai-codex/gpt-5.4": {
+              params: {
+                serviceTier: "priority",
+              },
+            },
+          },
+        },
+      },
+    };
+
+    applyExtraParamsToAgent(agent, cfg, "openai-codex", "gpt-5.4");
+
+    const model = {
+      api: "openai-codex-responses",
+      provider: "openai-codex",
+      id: "gpt-5.4",
+    } as Model<"openai-codex-responses">;
+    const context: Context = { messages: [] };
+    void agent.streamFn?.(model, context, {});
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.serviceTier).toBe("priority");
+  });
+
+  it("keeps legacy gpt-5.4-codex config keys working for gpt-5.4", () => {
+    const { calls, agent } = createOptionsCaptureAgent();
+    const cfg = {
+      agents: {
+        defaults: {
+          models: {
+            "openai-codex/gpt-5.4-codex": {
+              params: {
+                serviceTier: "priority",
+              },
+            },
+          },
+        },
+      },
+    };
+
+    applyExtraParamsToAgent(agent, cfg, "openai-codex", "gpt-5.4");
+
+    const model = {
+      api: "openai-codex-responses",
+      provider: "openai-codex",
+      id: "gpt-5.4",
+    } as Model<"openai-codex-responses">;
+    const context: Context = { messages: [] };
+    void agent.streamFn?.(model, context, {});
+
+    expect(calls).toHaveLength(1);
+    expect(calls[0]?.serviceTier).toBe("priority");
   });
 
   it("lets runtime options override configured transport", () => {

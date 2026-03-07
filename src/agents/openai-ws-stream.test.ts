@@ -941,7 +941,7 @@ describe("createOpenAIWebSocketStreamFn", () => {
 
   it("forwards reasoningEffort/reasoningSummary to response.create reasoning block", async () => {
     const streamFn = createOpenAIWebSocketStreamFn("sk-test", "sess-reason");
-    const opts = { reasoningEffort: "high", reasoningSummary: "auto" };
+    const opts = { reasoningEffort: "xhigh", reasoningSummary: "auto" };
     const stream = streamFn(
       modelStub as Parameters<typeof streamFn>[0],
       contextStub as Parameters<typeof streamFn>[1],
@@ -966,7 +966,37 @@ describe("createOpenAIWebSocketStreamFn", () => {
     });
     const sent = MockManager.lastInstance!.sentEvents[0] as Record<string, unknown>;
     expect(sent.type).toBe("response.create");
-    expect(sent.reasoning).toEqual({ effort: "high", summary: "auto" });
+    expect(sent.reasoning).toEqual({ effort: "xhigh", summary: "auto" });
+  });
+
+  it("forwards serviceTier to response.create service_tier", async () => {
+    const streamFn = createOpenAIWebSocketStreamFn("sk-test", "sess-tier");
+    const opts = { serviceTier: "priority" };
+    const stream = streamFn(
+      modelStub as Parameters<typeof streamFn>[0],
+      contextStub as Parameters<typeof streamFn>[1],
+      opts as unknown as Parameters<typeof streamFn>[2],
+    );
+    await new Promise<void>((resolve, reject) => {
+      queueMicrotask(async () => {
+        try {
+          await new Promise((r) => setImmediate(r));
+          MockManager.lastInstance!.simulateEvent({
+            type: "response.completed",
+            response: makeResponseObject("resp-tier", "Tiered"),
+          });
+          for await (const _ of await resolveStream(stream)) {
+            /* consume */
+          }
+          resolve();
+        } catch (e) {
+          reject(e);
+        }
+      });
+    });
+    const sent = MockManager.lastInstance!.sentEvents[0] as Record<string, unknown>;
+    expect(sent.type).toBe("response.create");
+    expect(sent.service_tier).toBe("priority");
   });
 
   it("forwards topP and toolChoice to response.create", async () => {

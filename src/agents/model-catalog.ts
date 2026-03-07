@@ -1,7 +1,17 @@
 import { type OpenClawConfig, loadConfig } from "../config/config.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
+import {
+  OPENAI_CODEX_GPT53_MODEL_ID,
+  OPENAI_CODEX_GPT53_SPARK_MODEL_ID,
+  OPENAI_CODEX_GPT54_LEGACY_MODEL_ID,
+  OPENAI_CODEX_GPT54_MODEL_ID,
+} from "../shared/openai-codex-models.js";
 import { resolveOpenClawAgentDir } from "./agent-paths.js";
 import { ensureOpenClawModelsJson } from "./models-config.js";
+import {
+  getOpenAICodexCliCatalogCacheKey,
+  loadOpenAICodexCliCatalog,
+} from "./openai-codex-cli-model-cache.js";
 
 const log = createSubsystemLogger("model-catalog");
 
@@ -28,13 +38,12 @@ type DiscoveredModel = {
 type PiSdkModule = typeof import("./pi-model-discovery.js");
 
 let modelCatalogPromise: Promise<ModelCatalogEntry[]> | null = null;
+let modelCatalogCacheKey = "";
 let hasLoggedModelCatalogError = false;
 const defaultImportPiSdk = () => import("./pi-model-discovery.js");
 let importPiSdk = defaultImportPiSdk;
 
 const CODEX_PROVIDER = "openai-codex";
-const OPENAI_CODEX_GPT53_MODEL_ID = "gpt-5.3-codex";
-const OPENAI_CODEX_GPT53_SPARK_MODEL_ID = "gpt-5.3-codex-spark";
 const NON_PI_NATIVE_MODEL_PROVIDERS = new Set(["kilocode"]);
 
 function applyOpenAICodexSparkFallback(models: ModelCatalogEntry[]): void {
@@ -59,6 +68,40 @@ function applyOpenAICodexSparkFallback(models: ModelCatalogEntry[]): void {
     ...baseModel,
     id: OPENAI_CODEX_GPT53_SPARK_MODEL_ID,
     name: OPENAI_CODEX_GPT53_SPARK_MODEL_ID,
+  });
+}
+
+function applyOpenAICodexGpt54Fallback(models: ModelCatalogEntry[]): void {
+  const hasGpt54 = models.some(
+    (entry) =>
+      entry.provider === CODEX_PROVIDER &&
+      (entry.id.toLowerCase() === OPENAI_CODEX_GPT54_MODEL_ID ||
+        entry.id.toLowerCase() === OPENAI_CODEX_GPT54_LEGACY_MODEL_ID),
+  );
+  if (hasGpt54) {
+    return;
+  }
+
+  const fallbackPriority = [
+    OPENAI_CODEX_GPT53_MODEL_ID,
+    "gpt-5.2-codex",
+    "gpt-5.2",
+    "gpt-5.1-codex",
+    "gpt-5.1",
+  ];
+  const baseModel = fallbackPriority
+    .map((id) =>
+      models.find((entry) => entry.provider === CODEX_PROVIDER && entry.id.toLowerCase() === id),
+    )
+    .find(Boolean);
+  if (!baseModel) {
+    return;
+  }
+
+  models.push({
+    ...baseModel,
+    id: OPENAI_CODEX_GPT54_MODEL_ID,
+    name: OPENAI_CODEX_GPT54_MODEL_ID,
   });
 }
 
@@ -145,8 +188,40 @@ function mergeConfiguredOptInProviderModels(params: {
   }
 }
 
+function upsertCatalogEntries(params: {
+  models: ModelCatalogEntry[];
+  incoming: readonly ModelCatalogEntry[];
+}): void {
+  const indexByKey = new Map(
+    params.models.map((entry, index) => [
+      `${entry.provider.toLowerCase().trim()}::${entry.id.toLowerCase().trim()}`,
+      index,
+    ]),
+  );
+
+  for (const entry of params.incoming) {
+    const key = `${entry.provider.toLowerCase().trim()}::${entry.id.toLowerCase().trim()}`;
+    const existingIndex = indexByKey.get(key);
+    if (existingIndex === undefined) {
+      params.models.push(entry);
+      indexByKey.set(key, params.models.length - 1);
+      continue;
+    }
+
+    const existing = params.models[existingIndex];
+    params.models[existingIndex] = {
+      ...existing,
+      ...entry,
+      contextWindow: entry.contextWindow ?? existing.contextWindow,
+      reasoning: entry.reasoning ?? existing.reasoning,
+      input: entry.input ?? existing.input,
+    };
+  }
+}
+
 export function resetModelCatalogCacheForTest() {
   modelCatalogPromise = null;
+  modelCatalogCacheKey = "";
   hasLoggedModelCatalogError = false;
   importPiSdk = defaultImportPiSdk;
 }
@@ -162,10 +237,13 @@ export async function loadModelCatalog(params?: {
 }): Promise<ModelCatalogEntry[]> {
   if (params?.useCache === false) {
     modelCatalogPromise = null;
+    modelCatalogCacheKey = "";
   }
-  if (modelCatalogPromise) {
+  const cacheKey = await getOpenAICodexCliCatalogCacheKey();
+  if (modelCatalogPromise && modelCatalogCacheKey === cacheKey) {
     return modelCatalogPromise;
   }
+  modelCatalogCacheKey = cacheKey;
 
   modelCatalogPromise = (async () => {
     const models: ModelCatalogEntry[] = [];
@@ -218,11 +296,14 @@ export async function loadModelCatalog(params?: {
         models.push({ id, name, provider, contextWindow, reasoning, input });
       }
       mergeConfiguredOptInProviderModels({ config: cfg, models });
+      upsertCatalogEntries({ models, incoming: await loadOpenAICodexCliCatalog() });
+      applyOpenAICodexGpt54Fallback(models);
       applyOpenAICodexSparkFallback(models);
 
       if (models.length === 0) {
         // If we found nothing, don't cache this result so we can try again.
         modelCatalogPromise = null;
+        modelCatalogCacheKey = "";
       }
 
       return sortModels(models);
@@ -233,6 +314,7 @@ export async function loadModelCatalog(params?: {
       }
       // Don't poison the cache on transient dependency/filesystem issues.
       modelCatalogPromise = null;
+      modelCatalogCacheKey = "";
       if (models.length > 0) {
         return sortModels(models);
       }

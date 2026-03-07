@@ -1,11 +1,19 @@
 import type { Api, Model } from "@mariozechner/pi-ai";
 import type { ModelRegistry } from "@mariozechner/pi-coding-agent";
+import {
+  OPENAI_CODEX_GPT53_MODEL_ID,
+  OPENAI_CODEX_GPT54_MODEL_ID,
+  normalizeOpenAICodexModelId,
+} from "../shared/openai-codex-models.js";
 import { DEFAULT_CONTEXT_TOKENS } from "./defaults.js";
 import { normalizeModelCompat } from "./model-compat.js";
 import { normalizeProviderId } from "./model-selection.js";
 
-const OPENAI_CODEX_GPT_53_MODEL_ID = "gpt-5.3-codex";
-const OPENAI_CODEX_TEMPLATE_MODEL_IDS = ["gpt-5.2-codex"] as const;
+const OPENAI_CODEX_FORWARD_COMPAT_MODEL_IDS = [
+  OPENAI_CODEX_GPT53_MODEL_ID,
+  OPENAI_CODEX_GPT54_MODEL_ID,
+] as const;
+const OPENAI_CODEX_TEMPLATE_MODEL_IDS = [OPENAI_CODEX_GPT53_MODEL_ID, "gpt-5.2-codex"] as const;
 
 const ANTHROPIC_OPUS_46_MODEL_ID = "claude-opus-4-6";
 const ANTHROPIC_OPUS_46_DOT_MODEL_ID = "claude-opus-4.6";
@@ -50,18 +58,30 @@ function cloneFirstTemplateModel(params: {
 
 const CODEX_GPT53_ELIGIBLE_PROVIDERS = new Set(["openai-codex", "github-copilot"]);
 
-function resolveOpenAICodexGpt53FallbackModel(
+function resolveOpenAICodexForwardCompatModel(
   provider: string,
   modelId: string,
   modelRegistry: ModelRegistry,
 ): Model<Api> | undefined {
   const normalizedProvider = normalizeProviderId(provider);
-  const trimmedModelId = modelId.trim();
+  const trimmedModelId = normalizeOpenAICodexModelId(modelId);
   if (!CODEX_GPT53_ELIGIBLE_PROVIDERS.has(normalizedProvider)) {
     return undefined;
   }
-  if (trimmedModelId.toLowerCase() !== OPENAI_CODEX_GPT_53_MODEL_ID) {
+  if (
+    !OPENAI_CODEX_FORWARD_COMPAT_MODEL_IDS.includes(
+      trimmedModelId.toLowerCase() as (typeof OPENAI_CODEX_FORWARD_COMPAT_MODEL_IDS)[number],
+    )
+  ) {
     return undefined;
+  }
+
+  const canonicalModel = modelRegistry.find(
+    normalizedProvider,
+    trimmedModelId,
+  ) as Model<Api> | null;
+  if (canonicalModel) {
+    return normalizeModelCompat(canonicalModel);
   }
 
   for (const templateId of OPENAI_CODEX_TEMPLATE_MODEL_IDS) {
@@ -248,7 +268,7 @@ export function resolveForwardCompatModel(
   modelRegistry: ModelRegistry,
 ): Model<Api> | undefined {
   return (
-    resolveOpenAICodexGpt53FallbackModel(provider, modelId, modelRegistry) ??
+    resolveOpenAICodexForwardCompatModel(provider, modelId, modelRegistry) ??
     resolveAnthropicOpus46ForwardCompatModel(provider, modelId, modelRegistry) ??
     resolveAnthropicSonnet46ForwardCompatModel(provider, modelId, modelRegistry) ??
     resolveZaiGlm5ForwardCompatModel(provider, modelId, modelRegistry) ??

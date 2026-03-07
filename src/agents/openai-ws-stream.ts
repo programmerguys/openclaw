@@ -16,7 +16,7 @@
  *    the existing HTTP `streamSimple`; forced `websocket` mode surfaces WS errors
  *  - **Zero shared state**: per-session registry; session cleanup on dispose prevents leaks
  *  - **Full parity**: all generation options (temperature, top_p, max_output_tokens,
- *    tool_choice, reasoning) forwarded identically to the HTTP path
+ *    tool_choice, reasoning, service_tier) forwarded identically to the HTTP path
  *
  * @see src/agents/openai-ws-connection.ts for the connection manager
  */
@@ -563,6 +563,7 @@ export function createOpenAIWebSocketStreamFn(
             maxTokens?: number;
             topP?: number;
             toolChoice?: unknown;
+            serviceTier?: "auto" | "default" | "flex" | "priority";
           })
         | undefined;
       const extraParams: Record<string, unknown> = {};
@@ -577,6 +578,9 @@ export function createOpenAIWebSocketStreamFn(
       }
       if (streamOpts?.toolChoice !== undefined) {
         extraParams.tool_choice = streamOpts.toolChoice;
+      }
+      if (streamOpts?.serviceTier !== undefined) {
+        extraParams.service_tier = streamOpts.serviceTier;
       }
       if (streamOpts?.reasoningEffort || streamOpts?.reasoningSummary) {
         const reasoning: { effort?: string; summary?: string } = {};
