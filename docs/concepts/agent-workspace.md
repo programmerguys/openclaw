@@ -74,6 +74,10 @@ These are the standard files OpenClaw expects inside the workspace:
   - Persona, tone, and boundaries.
   - Loaded every session.
 
+- `PEERS.md`
+  - Guidance for how this agent should interact with peer bots and agents.
+  - Loaded every session.
+
 - `USER.md`
   - Who the user is and how to address them.
   - Loaded every session.

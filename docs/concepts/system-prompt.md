@@ -57,6 +57,7 @@ Bootstrap files are trimmed and appended under **Project Context** so the model 
 - `TOOLS.md`
 - `IDENTITY.md`
 - `USER.md`
+- `PEERS.md`
 - `HEARTBEAT.md`
 - `BOOTSTRAP.md` (only on brand-new workspaces)
 - `MEMORY.md` and/or `memory.md` (when present in the workspace; either or both may be injected)

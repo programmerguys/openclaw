@@ -31,6 +31,7 @@ Inside `agents.defaults.workspace`, OpenClaw expects these user-editable files:
 - `BOOTSTRAP.md` — one-time first-run ritual (deleted after completion)
 - `IDENTITY.md` — agent name/vibe/emoji
 - `USER.md` — user profile + preferred address
+- `PEERS.md` — norms for interacting with peer bots/agents
 
 On the first turn of a new session, OpenClaw injects the contents of these files directly into the agent context.
 

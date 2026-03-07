@@ -7,6 +7,7 @@ import {
   DEFAULT_AGENTS_FILENAME,
   DEFAULT_BOOTSTRAP_FILENAME,
   DEFAULT_IDENTITY_FILENAME,
+  DEFAULT_PEERS_FILENAME,
   DEFAULT_MEMORY_ALT_FILENAME,
   DEFAULT_MEMORY_FILENAME,
   DEFAULT_TOOLS_FILENAME,
@@ -66,6 +67,7 @@ function expectSubagentAllowedBootstrapNames(files: WorkspaceBootstrapFile[]) {
   expect(names).toContain("SOUL.md");
   expect(names).toContain("IDENTITY.md");
   expect(names).toContain("USER.md");
+  expect(names).toContain("PEERS.md");
   expect(names).not.toContain("HEARTBEAT.md");
   expect(names).not.toContain("BOOTSTRAP.md");
   expect(names).not.toContain("MEMORY.md");
@@ -78,6 +80,7 @@ describe("ensureAgentWorkspace", () => {
     await ensureAgentWorkspace({ dir: tempDir, ensureBootstrapFiles: true });
 
     await expectBootstrapSeeded(tempDir);
+    await expect(fs.access(path.join(tempDir, DEFAULT_PEERS_FILENAME))).resolves.toBeUndefined();
     expect((await readOnboardingState(tempDir)).onboardingCompletedAt).toBeUndefined();
   });
 
@@ -168,6 +171,31 @@ describe("loadWorkspaceBootstrapFiles", () => {
     expect(memoryEntries[0]?.content).toBe(content);
   };
 
+  it("includes PEERS.md when present", async () => {
+    const tempDir = await makeTempWorkspace("openclaw-workspace-");
+    await writeWorkspaceFile({ dir: tempDir, name: "PEERS.md", content: "peers" });
+
+    const files = await loadWorkspaceBootstrapFiles(tempDir);
+    const peersEntry = files.find((file) => file.name === DEFAULT_PEERS_FILENAME);
+    expect(peersEntry).toMatchObject({
+      name: DEFAULT_PEERS_FILENAME,
+      missing: false,
+      content: "peers",
+    });
+  });
+
+  it("marks PEERS.md missing when absent", async () => {
+    const tempDir = await makeTempWorkspace("openclaw-workspace-");
+
+    const files = await loadWorkspaceBootstrapFiles(tempDir);
+    const peersEntry = files.find((file) => file.name === DEFAULT_PEERS_FILENAME);
+    expect(peersEntry).toMatchObject({
+      name: DEFAULT_PEERS_FILENAME,
+      missing: true,
+    });
+    expect(peersEntry?.content).toBeUndefined();
+  });
+
   it("includes MEMORY.md when present", async () => {
     const tempDir = await makeTempWorkspace("openclaw-workspace-");
     await writeWorkspaceFile({ dir: tempDir, name: "MEMORY.md", content: "memory" });
@@ -231,6 +259,7 @@ describe("filterBootstrapFilesForSession", () => {
     { name: "IDENTITY.md", path: "/w/IDENTITY.md", content: "", missing: false },
     { name: "USER.md", path: "/w/USER.md", content: "", missing: false },
     { name: "HEARTBEAT.md", path: "/w/HEARTBEAT.md", content: "", missing: false },
+    { name: "PEERS.md", path: "/w/PEERS.md", content: "", missing: false },
     { name: "BOOTSTRAP.md", path: "/w/BOOTSTRAP.md", content: "", missing: false },
     { name: "MEMORY.md", path: "/w/MEMORY.md", content: "", missing: false },
   ];

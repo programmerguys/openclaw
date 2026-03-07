@@ -312,7 +312,7 @@ Runbook: [iOS connect](https://docs.openclaw.ai/platforms/ios).
 ## Agent workspace + skills
 
 - Workspace root: `~/.openclaw/workspace` (configurable via `agents.defaults.workspace`).
-- Injected prompt files: `AGENTS.md`, `SOUL.md`, `TOOLS.md`.
+- Injected prompt files: `AGENTS.md`, `SOUL.md`, `TOOLS.md`, `IDENTITY.md`, `USER.md`, `PEERS.md`, `HEARTBEAT.md`, `BOOTSTRAP.md` (first-run), and optional `MEMORY.md`/`memory.md`.
 - Skills: `~/.openclaw/workspace/skills/<skill>/SKILL.md`.
 
 ## Configuration
