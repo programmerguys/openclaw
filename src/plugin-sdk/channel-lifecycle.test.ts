@@ -63,4 +63,22 @@ describe("plugin-sdk channel lifecycle helpers", () => {
     await expect(task).resolves.toBeUndefined();
     expect(onAbort).toHaveBeenCalledOnce();
   });
+
+  it("handles already-aborted signals without leaking listeners", async () => {
+    const server = createFakeServer();
+    const abort = new AbortController();
+    const onAbort = vi.fn(async () => {
+      server.close();
+    });
+
+    abort.abort();
+    await expect(
+      keepHttpServerTaskAlive({
+        server,
+        abortSignal: abort.signal,
+        onAbort,
+      }),
+    ).resolves.toBeUndefined();
+    expect(onAbort).toHaveBeenCalledOnce();
+  });
 });

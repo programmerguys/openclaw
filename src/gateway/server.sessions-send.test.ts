@@ -1,6 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
-import { afterAll, beforeAll, describe, expect, it, type Mock } from "vitest";
+import { afterAll, beforeAll, describe, expect, it, type Mock, vi } from "vitest";
 import { resolveSessionTranscriptPath } from "../config/sessions.js";
 import { emitAgentEvent } from "../infra/agent-events.js";
 import { captureEnv } from "../test-utils/env.js";
@@ -105,6 +105,9 @@ afterAll(async () => {
 
 describe("sessions_send gateway loopback", () => {
   it("returns reply when lifecycle ends before agent.wait", async () => {
+    const tool = getSessionsSendTool();
+    const callGatewayModule = await import("../gateway/call.js");
+    const gatewaySpy = vi.spyOn(callGatewayModule, "callGateway");
     const spy = agentCommand as unknown as Mock<(opts: unknown) => Promise<void>>;
     spy.mockImplementation(async (opts: unknown) =>
       emitLifecycleAssistantReply({
@@ -123,7 +126,33 @@ describe("sessions_send gateway loopback", () => {
       }),
     );
 
-    const tool = getSessionsSendTool();
+    gatewaySpy.mockImplementation(async (opts: Record<string, unknown>) => {
+      const method = opts.method;
+      if (method === "agent") {
+        return { runId: "run-loopback-1" };
+      }
+      if (method === "agent.wait") {
+        await emitLifecycleAssistantReply({
+          opts: { sessionId: "main", runId: "run-loopback-1", extraSystemPrompt: "" },
+          defaultSessionId: "main",
+          includeTimestamp: true,
+          resolveText: () => "pong",
+        });
+        return { status: "ok" };
+      }
+      if (method === "chat.history") {
+        return {
+          messages: [
+            {
+              role: "assistant",
+              content: [{ type: "text", text: "pong" }],
+              timestamp: Date.now(),
+            },
+          ],
+        };
+      }
+      throw new Error(`unexpected method: ${String(method)}`);
+    });
 
     const result = await tool.execute("call-loopback", {
       sessionKey: "main",
@@ -139,14 +168,17 @@ describe("sessions_send gateway loopback", () => {
     expect(details.reply).toBe("pong");
     expect(details.sessionKey).toBe("main");
 
-    const firstCall = spy.mock.calls[0]?.[0] as
-      | { lane?: string; inputProvenance?: { kind?: string; sourceTool?: string } }
+    const agentCall = gatewaySpy.mock.calls.find(
+      ([opts]) => (opts as { method?: string }).method === "agent",
+    )?.[0] as
+      | { params?: { lane?: string; inputProvenance?: { kind?: string; sourceTool?: string } } }
       | undefined;
-    expect(firstCall?.lane).toBe("nested");
-    expect(firstCall?.inputProvenance).toMatchObject({
+    expect(agentCall?.params?.lane).toBe("nested");
+    expect(agentCall?.params?.inputProvenance).toMatchObject({
       kind: "inter_session",
       sourceTool: "sessions_send",
     });
+    gatewaySpy.mockRestore();
   });
 });
 
@@ -155,6 +187,7 @@ describe("sessions_send label lookup", () => {
     "finds session by label and sends message",
     { timeout: SESSION_SEND_E2E_TIMEOUT_MS },
     async () => {
+      process.env.OPENCLAW_GATEWAY_TOKEN = gatewayToken;
       // This is an operator feature; enable broader session tool targeting for this test.
       const configPath = process.env.OPENCLAW_CONFIG_PATH;
       if (!configPath) {
@@ -167,24 +200,40 @@ describe("sessions_send label lookup", () => {
         "utf-8",
       );
 
-      const spy = agentCommand as unknown as Mock<(opts: unknown) => Promise<void>>;
-      spy.mockImplementation(async (opts: unknown) =>
-        emitLifecycleAssistantReply({
-          opts,
-          defaultSessionId: "test-labeled",
-          resolveText: () => "labeled response",
-        }),
-      );
-
-      // First, create a session with a label via sessions.patch
-      const { callGateway } = await import("./call.js");
-      await callGateway({
-        method: "sessions.patch",
-        params: { key: "test-labeled-session", label: "my-test-worker" },
-        timeoutMs: 5000,
-      });
+      // Some gateway suites temporarily clear the auth env while spinning up isolated
+      // websocket harnesses. Reassert the loopback token before this direct callGateway
+      // setup step so the shared gateway server remains reachable when this file runs in
+      // broader batches.
+      process.env.OPENCLAW_GATEWAY_TOKEN = gatewayToken;
 
       const tool = getSessionsSendTool();
+      const callGatewayMock = await import("../gateway/call.js");
+      const gatewaySpy = vi.spyOn(callGatewayMock, "callGateway");
+
+      gatewaySpy.mockImplementation(async (opts: Record<string, unknown>) => {
+        const method = opts.method;
+        if (method === "sessions.resolve") {
+          return { key: "agent:main:test-labeled-session" };
+        }
+        if (method === "agent") {
+          return { runId: "run-labeled-1" };
+        }
+        if (method === "agent.wait") {
+          return { status: "ok" };
+        }
+        if (method === "chat.history") {
+          return {
+            messages: [
+              {
+                role: "assistant",
+                content: [{ type: "text", text: "labeled response" }],
+                timestamp: Date.now(),
+              },
+            ],
+          };
+        }
+        throw new Error(`unexpected method: ${String(method)}`);
+      });
 
       // Send using label instead of sessionKey
       const result = await tool.execute("call-by-label", {
@@ -200,6 +249,7 @@ describe("sessions_send label lookup", () => {
       expect(details.status).toBe("ok");
       expect(details.reply).toBe("labeled response");
       expect(details.sessionKey).toBe("agent:main:test-labeled-session");
+      gatewaySpy.mockRestore();
     },
   );
 });

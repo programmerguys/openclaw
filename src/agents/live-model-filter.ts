@@ -1,10 +1,3 @@
-import {
-  OPENAI_CODEX_GPT53_MODEL_ID,
-  OPENAI_CODEX_GPT53_SPARK_MODEL_ID,
-  OPENAI_CODEX_GPT54_LEGACY_MODEL_ID,
-  OPENAI_CODEX_GPT54_MODEL_ID,
-} from "../shared/openai-codex-models.js";
-
 export type ModelRef = {
   provider?: string | null;
   id?: string | null;
@@ -19,12 +12,11 @@ const ANTHROPIC_PREFIXES = [
 ];
 const OPENAI_MODELS = ["gpt-5.4", "gpt-5.2", "gpt-5.0"];
 const CODEX_MODELS = [
-  OPENAI_CODEX_GPT54_MODEL_ID,
-  OPENAI_CODEX_GPT54_LEGACY_MODEL_ID,
+  "gpt-5.4",
   "gpt-5.2",
   "gpt-5.2-codex",
-  OPENAI_CODEX_GPT53_MODEL_ID,
-  OPENAI_CODEX_GPT53_SPARK_MODEL_ID,
+  "gpt-5.3-codex",
+  "gpt-5.3-codex-spark",
   "gpt-5.1-codex",
   "gpt-5.1-codex-mini",
   "gpt-5.1-codex-max",

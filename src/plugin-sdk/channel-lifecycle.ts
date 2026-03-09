@@ -2,6 +2,21 @@ type CloseAwareServer = {
   once: (event: "close", listener: () => void) => unknown;
 };
 
+type AbortSignalLike = Pick<AbortSignal, "aborted" | "addEventListener" | "removeEventListener">;
+
+function addAbortOnce(signal: AbortSignalLike | undefined, listener: () => void): () => void {
+  if (!signal) {
+    return () => {};
+  }
+  if (signal.aborted) {
+    listener();
+    return () => {};
+  }
+  const onAbort = () => listener();
+  signal.addEventListener("abort", onAbort, { once: true });
+  return () => signal.removeEventListener("abort", onAbort);
+}
+
 /**
  * Return a promise that resolves when the signal is aborted.
  *
@@ -9,14 +24,8 @@ type CloseAwareServer = {
  */
 export function waitUntilAbort(signal?: AbortSignal): Promise<void> {
   return new Promise<void>((resolve) => {
-    if (!signal) {
-      return;
-    }
-    if (signal.aborted) {
-      resolve();
-      return;
-    }
-    signal.addEventListener("abort", () => resolve(), { once: true });
+    const dispose = addAbortOnce(signal, resolve);
+    void dispose;
   });
 }
 
@@ -43,24 +52,12 @@ export async function keepHttpServerTaskAlive(params: {
     abortTask = Promise.resolve(onAbort?.()).then(() => undefined);
   };
 
-  const onAbortSignal = () => {
-    triggerAbort();
-  };
-
-  if (abortSignal) {
-    if (abortSignal.aborted) {
-      triggerAbort();
-    } else {
-      abortSignal.addEventListener("abort", onAbortSignal, { once: true });
-    }
-  }
+  const disposeAbortListener = addAbortOnce(abortSignal, triggerAbort);
 
   await new Promise<void>((resolve) => {
     server.once("close", () => resolve());
   });
 
-  if (abortSignal) {
-    abortSignal.removeEventListener("abort", onAbortSignal);
-  }
+  disposeAbortListener();
   await abortTask;
 }

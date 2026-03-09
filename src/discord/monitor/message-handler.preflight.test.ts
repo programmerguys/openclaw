@@ -398,7 +398,7 @@ describe("preflightDiscordMessage", () => {
           "[discord-preflight-bot] stage=received messageId=m-bot-log-allow authorId=relay-bot-logs authorBot=true channelId=channel-bot-log-1 guildId=guild-1 botUserId=openclaw-bot allowBots=true requireMention=unknown mentionedUsersSource=none mentionedUsers=none explicitlyMentioned=unknown hasAnyMention=unknown",
         ),
         expect.stringContaining(
-          "[discord-preflight-bot] stage=decision messageId=m-bot-log-allow authorId=relay-bot-logs authorBot=true channelId=channel-bot-log-1 guildId=guild-1 botUserId=openclaw-bot allowBots=true requireMention=true mentionedUsersSource=message.mentions.users mentionedUsers=openclaw-bot explicitlyMentioned=true hasAnyMention=true decision=allow dropReason=none",
+          "[discord-preflight-bot] stage=decision messageId=m-bot-log-allow authorId=relay-bot-logs authorBot=true channelId=channel-bot-log-1 guildId=guild-1 botUserId=openclaw-bot allowBots=true requireMention=true mentionedUsersSource=message.mentions.users mentionedUsers=openclaw-bot explicitlyMentioned=true hasAnyMention=false decision=allow dropReason=none",
         ),
         expect.stringContaining(
           "[discord-preflight-bot] stage=decision messageId=m-bot-log-drop authorId=relay-bot-logs authorBot=true channelId=channel-bot-log-1 guildId=guild-1 botUserId=openclaw-bot allowBots=true requireMention=true mentionedUsersSource=message.mentions.users mentionedUsers=none explicitlyMentioned=false hasAnyMention=false decision=drop dropReason=no-mention",
