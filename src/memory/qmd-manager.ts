@@ -175,6 +175,11 @@ export class QmdMemoryManager implements MemorySearchManager {
   private closed = false;
   private db: SqliteDatabase | null = null;
   private lastUpdateAt: number | null = null;
+  private statusCountsCache: {
+    totalDocuments: number;
+    sourceCounts: Array<{ source: MemorySource; files: number; chunks: number }>;
+    refreshedAt: number;
+  } | null = null;
   private lastEmbedAt: number | null = null;
   private embedBackoffUntil: number | null = null;
   private embedFailureCount = 0;
@@ -944,6 +949,8 @@ export class QmdMemoryManager implements MemorySearchManager {
         qmd: {
           collections: this.qmd.collections.length,
           lastUpdateAt: this.lastUpdateAt,
+          countsRefreshedAt: counts.refreshedAt ?? null,
+          countsCache: counts.cached === true,
         },
       },
     };
@@ -1019,6 +1026,7 @@ export class QmdMemoryManager implements MemorySearchManager {
         }
       }
       this.lastUpdateAt = Date.now();
+      this.statusCountsCache = null;
       this.docPathCache.clear();
     };
     this.pendingUpdate = run().finally(() => {
@@ -1691,7 +1699,18 @@ export class QmdMemoryManager implements MemorySearchManager {
   private readCounts(): {
     totalDocuments: number;
     sourceCounts: Array<{ source: MemorySource; files: number; chunks: number }>;
+    refreshedAt?: number;
+    cached?: boolean;
   } {
+    const cached = this.statusCountsCache;
+    if (cached && Date.now() - cached.refreshedAt < 30_000) {
+      return {
+        totalDocuments: cached.totalDocuments,
+        sourceCounts: cached.sourceCounts.map((entry) => ({ ...entry })),
+        refreshedAt: cached.refreshedAt,
+        cached: true,
+      };
+    }
     try {
       const db = this.ensureDb();
       const rows = db
@@ -1713,16 +1732,32 @@ export class QmdMemoryManager implements MemorySearchManager {
         bySource.set(source, entry);
         total += row.c ?? 0;
       }
+      const sourceCounts = Array.from(bySource.entries()).map(([source, value]) => ({
+        source,
+        files: value.files,
+        chunks: value.chunks,
+      }));
+      const refreshedAt = Date.now();
+      this.statusCountsCache = {
+        totalDocuments: total,
+        sourceCounts: sourceCounts.map((entry) => ({ ...entry })),
+        refreshedAt,
+      };
       return {
         totalDocuments: total,
-        sourceCounts: Array.from(bySource.entries()).map(([source, value]) => ({
-          source,
-          files: value.files,
-          chunks: value.chunks,
-        })),
+        sourceCounts,
+        refreshedAt,
       };
     } catch (err) {
       log.warn(`failed to read qmd index stats: ${String(err)}`);
+      if (cached) {
+        return {
+          totalDocuments: cached.totalDocuments,
+          sourceCounts: cached.sourceCounts.map((entry) => ({ ...entry })),
+          refreshedAt: cached.refreshedAt,
+          cached: true,
+        };
+      }
       return {
         totalDocuments: 0,
         sourceCounts: Array.from(this.sources).map((source) => ({ source, files: 0, chunks: 0 })),

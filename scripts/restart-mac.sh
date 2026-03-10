@@ -9,7 +9,6 @@ APP_PROCESS_PATTERN="OpenClaw.app/Contents/MacOS/OpenClaw"
 DEBUG_PROCESS_PATTERN="${ROOT_DIR}/apps/macos/.build/debug/OpenClaw"
 LOCAL_PROCESS_PATTERN="${ROOT_DIR}/apps/macos/.build-local/debug/OpenClaw"
 RELEASE_PROCESS_PATTERN="${ROOT_DIR}/apps/macos/.build/release/OpenClaw"
-LAUNCH_AGENT="${HOME}/Library/LaunchAgents/ai.openclaw.mac.plist"
 LOCK_KEY="$(printf '%s' "${ROOT_DIR}" | shasum -a 256 | cut -c1-8)"
 LOCK_DIR="${TMPDIR:-/tmp}/openclaw-restart-${LOCK_KEY}"
 LOCK_PID_FILE="${LOCK_DIR}/pid"
@@ -18,7 +17,6 @@ LOG_PATH="${OPENCLAW_RESTART_LOG:-/tmp/openclaw-restart.log}"
 NO_SIGN=0
 SIGN=0
 AUTO_DETECT_SIGNING=1
-GATEWAY_WAIT_SECONDS="${OPENCLAW_GATEWAY_WAIT_SECONDS:-0}"
 LAUNCHAGENT_DISABLE_MARKER="${HOME}/.openclaw/disable-launchagent"
 ATTACH_ONLY=1
 
@@ -83,24 +81,17 @@ for arg in "$@"; do
     --no-sign) NO_SIGN=1; AUTO_DETECT_SIGNING=0 ;;
     --sign) SIGN=1; AUTO_DETECT_SIGNING=0 ;;
     --attach-only) ATTACH_ONLY=1 ;;
-    --no-attach-only) ATTACH_ONLY=0 ;;
+    --no-attach-only) fail "--no-attach-only is disabled. This machine keeps Gateway in watch mode; use --attach-only only." ;;
     --help|-h)
-      log "Usage: $(basename "$0") [--wait] [--no-sign] [--sign] [--attach-only|--no-attach-only]"
+      log "Usage: $(basename "$0") [--wait] [--no-sign] [--sign] [--attach-only]"
       log "  --wait    Wait for other restart to complete instead of exiting"
       log "  --no-sign Force no code signing (fastest for development)"
       log "  --sign    Force code signing (will fail if no signing key available)"
-      log "  --attach-only    Launch app with --attach-only (skip launchd install)"
-      log "  --no-attach-only Launch app without attach-only override"
+      log "  --attach-only    Launch app with --attach-only (always enforced)"
       log ""
-      log "Env:"
-      log "  OPENCLAW_GATEWAY_WAIT_SECONDS=0  Wait time before gateway port check (unsigned only)"
-      log ""
-      log "Unsigned recovery:"
-      log "  node openclaw.mjs daemon install --force --runtime node"
-      log "  node openclaw.mjs daemon restart"
-      log ""
-      log "Reset unsigned overrides:"
-      log "  rm ~/.openclaw/disable-launchagent"
+      log "Watch-mode safety:"
+      log "  This script keeps ~/.openclaw/disable-launchagent in place."
+      log "  It never runs daemon install/restart or rewrites Gateway LaunchAgents."
       log ""
       log "Default behavior: Auto-detect signing keys, fallback to --no-sign if none found"
       exit 0
@@ -122,6 +113,7 @@ if [[ "$NO_SIGN" -eq 1 ]]; then
 fi
 if [[ "$ATTACH_ONLY" -eq 1 ]]; then
   log "==> Using --attach-only (skip launchd install)"
+  log "==> Watch-mode safety enabled; gateway LaunchAgents will not be rewritten"
 fi
 
 acquire_lock
@@ -209,34 +201,9 @@ choose_app_bundle() {
 
 choose_app_bundle
 
-# When signed, clear any previous launchagent override marker.
-if [[ "$NO_SIGN" -ne 1 && "$ATTACH_ONLY" -ne 1 && -f "${LAUNCHAGENT_DISABLE_MARKER}" ]]; then
-  run_step "clear launchagent disable marker" /bin/rm -f "${LAUNCHAGENT_DISABLE_MARKER}"
-fi
-
-# When unsigned, ensure the gateway LaunchAgent targets the repo CLI (before the app launches).
-# This reduces noisy "could not connect" errors during app startup.
-if [ "$NO_SIGN" -eq 1 ] && [ "$ATTACH_ONLY" -ne 1 ]; then
-  run_step "install gateway launch agent (unsigned)" bash -lc "cd '${ROOT_DIR}' && node openclaw.mjs daemon install --force --runtime node"
-  run_step "restart gateway daemon (unsigned)" bash -lc "cd '${ROOT_DIR}' && node openclaw.mjs daemon restart"
-  if [[ "${GATEWAY_WAIT_SECONDS}" -gt 0 ]]; then
-    run_step "wait for gateway (unsigned)" sleep "${GATEWAY_WAIT_SECONDS}"
-  fi
-  GATEWAY_PORT="$(
-    node -e '
-      const fs = require("node:fs");
-      const path = require("node:path");
-      try {
-        const raw = fs.readFileSync(path.join(process.env.HOME, ".openclaw", "openclaw.json"), "utf8");
-        const cfg = JSON.parse(raw);
-        const port = cfg && cfg.gateway && typeof cfg.gateway.port === "number" ? cfg.gateway.port : 18789;
-        process.stdout.write(String(port));
-      } catch {
-        process.stdout.write("18789");
-      }
-    '
-  )"
-  run_step "verify gateway port ${GATEWAY_PORT} (unsigned)" bash -lc "lsof -iTCP:${GATEWAY_PORT} -sTCP:LISTEN | head -n 5 || true"
+# Preserve the launchagent disable marker so the app never rewrites watch-managed Gateway services.
+if [[ ! -f "${LAUNCHAGENT_DISABLE_MARKER}" ]]; then
+  run_step "enforce launchagent disable marker" /usr/bin/touch "${LAUNCHAGENT_DISABLE_MARKER}"
 fi
 
 ATTACH_ONLY_ARGS=()
@@ -262,8 +229,4 @@ if pgrep -f "${APP_PROCESS_PATTERN}" >/dev/null 2>&1; then
   log "OK: OpenClaw is running."
 else
   fail "App exited immediately. Check ${LOG_PATH} or Console.app (User Reports)."
-fi
-
-if [ "$NO_SIGN" -eq 1 ] && [ "$ATTACH_ONLY" -ne 1 ]; then
-  run_step "show gateway launch agent args (unsigned)" bash -lc "/usr/bin/plutil -p '${HOME}/Library/LaunchAgents/ai.openclaw.gateway.plist' | head -n 40 || true"
 fi

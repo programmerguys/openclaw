@@ -18,6 +18,7 @@ import type { OpenClawConfig } from "../config/config.js";
 import { createSubsystemLogger } from "../logging/subsystem.js";
 
 const log = createSubsystemLogger("llm-slug-generator");
+const SLUG_GENERATION_TIMEOUT_MS = 45_000;
 
 /**
  * Generate a short 1-2 word filename slug from session content using LLM
@@ -61,7 +62,7 @@ Reply with ONLY the slug, nothing else. Examples: "vendor-pitch", "api-design", 
       prompt,
       provider,
       model,
-      timeoutMs: 15_000, // 15 second timeout
+      timeoutMs: SLUG_GENERATION_TIMEOUT_MS,
       runId: `slug-gen-${Date.now()}`,
     });
 

@@ -27,6 +27,8 @@ async function prepareRoutedCommand(params: {
 }
 
 export async function tryRouteCli(argv: string[]): Promise<boolean> {
+  const profile = process.env.OPENCLAW_STATUS_JSON_PROFILE === "1";
+  const routeStartedAt = profile ? Date.now() : 0;
   if (isTruthyEnvValue(process.env.OPENCLAW_DISABLE_ROUTE_FIRST)) {
     return false;
   }
@@ -42,6 +44,17 @@ export async function tryRouteCli(argv: string[]): Promise<boolean> {
   if (!route) {
     return false;
   }
+  const prepareStartedAt = profile ? Date.now() : 0;
   await prepareRoutedCommand({ argv, commandPath: path, loadPlugins: route.loadPlugins });
-  return route.run(argv);
+  if (profile) {
+    console.error(`[status-json-profile] route.prepare=${Date.now() - prepareStartedAt}ms`);
+  }
+  const runStartedAt = profile ? Date.now() : 0;
+  const result = await route.run(argv);
+  if (profile) {
+    console.error(
+      `[status-json-profile] route.run=${Date.now() - runStartedAt}ms total=${Date.now() - routeStartedAt}ms`,
+    );
+  }
+  return result;
 }

@@ -176,17 +176,108 @@ const logRunner = (message, deps) => {
   deps.stderr.write(`[openclaw] ${message}\n`);
 };
 
-const runOpenClaw = async (deps) => {
-  const nodeProcess = deps.spawn(deps.execPath, ["openclaw.mjs", ...deps.args], {
-    cwd: deps.cwd,
-    env: deps.env,
-    stdio: "inherit",
+const waitForChildResult = async (child) =>
+  await new Promise((resolve) => {
+    let settled = false;
+    const finish = (result) => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      resolve(result);
+    };
+    child.on?.("error", (error) => finish({ exitCode: null, exitSignal: null, error }));
+    child.on?.("exit", (exitCode, exitSignal) => finish({ exitCode, exitSignal, error: null }));
   });
-  const res = await new Promise((resolve) => {
-    nodeProcess.on("exit", (exitCode, exitSignal) => {
-      resolve({ exitCode, exitSignal });
+
+const spawnWithResult = async (command, args, options, deps) => {
+  try {
+    const child = deps.spawn(command, args, options);
+    return await waitForChildResult(child);
+  } catch (error) {
+    return { exitCode: null, exitSignal: null, error };
+  }
+};
+
+const resolveBuildInvocations = (deps) => {
+  if (deps.platform === "win32") {
+    return [
+      { command: "cmd.exe", args: ["/d", "/s", "/c", "pnpm", ...compilerArgs], label: "pnpm" },
+    ];
+  }
+
+  const candidates = [];
+  const execDir = path.dirname(deps.execPath);
+  const siblingPnpm = path.join(execDir, "pnpm");
+  const siblingNpm = path.join(execDir, "npm");
+
+  if (statMtime(siblingPnpm, deps.fs) != null) {
+    candidates.push({ command: siblingPnpm, args: compilerArgs, label: siblingPnpm });
+  }
+  candidates.push({ command: "pnpm", args: compilerArgs, label: "pnpm" });
+
+  if (statMtime(siblingNpm, deps.fs) != null) {
+    candidates.push({
+      command: siblingNpm,
+      args: ["exec", compiler, "--", "--no-clean"],
+      label: siblingNpm,
     });
-  });
+  }
+  candidates.push({ command: "npm", args: ["exec", compiler, "--", "--no-clean"], label: "npm" });
+
+  return candidates;
+};
+
+const runBuild = async (deps) => {
+  let lastError = null;
+  for (const invocation of resolveBuildInvocations(deps)) {
+    const result = await spawnWithResult(
+      invocation.command,
+      invocation.args,
+      {
+        cwd: deps.cwd,
+        env: deps.env,
+        stdio: "inherit",
+      },
+      deps,
+    );
+
+    if (!result.error) {
+      return result;
+    }
+
+    lastError = { ...result, invocation };
+    if (result.error?.code === "ENOENT") {
+      logRunner(`Build command not found: ${invocation.label}`, deps);
+      continue;
+    }
+    return lastError;
+  }
+
+  return (
+    lastError ?? {
+      exitCode: null,
+      exitSignal: null,
+      error: new Error("No build command available."),
+    }
+  );
+};
+
+const runOpenClaw = async (deps) => {
+  const res = await spawnWithResult(
+    deps.execPath,
+    ["openclaw.mjs", ...deps.args],
+    {
+      cwd: deps.cwd,
+      env: deps.env,
+      stdio: "inherit",
+    },
+    deps,
+  );
+  if (res.error) {
+    logRunner(`Failed to start OpenClaw: ${res.error?.message ?? "unknown error"}`, deps);
+    return 1;
+  }
   if (res.exitSignal) {
     return 1;
   }
@@ -231,18 +322,11 @@ export async function runNodeMain(params = {}) {
   }
 
   logRunner("Building TypeScript (dist is stale).", deps);
-  const buildCmd = deps.platform === "win32" ? "cmd.exe" : "pnpm";
-  const buildArgs =
-    deps.platform === "win32" ? ["/d", "/s", "/c", "pnpm", ...compilerArgs] : compilerArgs;
-  const build = deps.spawn(buildCmd, buildArgs, {
-    cwd: deps.cwd,
-    env: deps.env,
-    stdio: "inherit",
-  });
-
-  const buildRes = await new Promise((resolve) => {
-    build.on("exit", (exitCode, exitSignal) => resolve({ exitCode, exitSignal }));
-  });
+  const buildRes = await runBuild(deps);
+  if (buildRes.error) {
+    logRunner(`Failed to start build: ${buildRes.error?.message ?? "unknown error"}`, deps);
+    return 1;
+  }
   if (buildRes.exitSignal) {
     return 1;
   }
