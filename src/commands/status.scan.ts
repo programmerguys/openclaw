@@ -46,6 +46,27 @@ type GatewayProbeSnapshot = {
   gatewayProbe: Awaited<ReturnType<typeof probeGateway>> | null;
 };
 
+function withTimeout<T>(promise: Promise<T>, timeoutMs: number): Promise<T> {
+  if (!(timeoutMs > 0)) {
+    return promise;
+  }
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => {
+      reject(new Error(`timeout after ${timeoutMs}ms`));
+    }, timeoutMs);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 function deferResult<T>(promise: Promise<T>): Promise<DeferredResult<T>> {
   return promise.then(
     (value) => ({ ok: true, value }),
@@ -67,7 +88,11 @@ function resolveMemoryPluginStatus(cfg: OpenClawConfig): MemoryPluginStatus {
   }
   const raw = typeof cfg.plugins?.slots?.memory === "string" ? cfg.plugins.slots.memory.trim() : "";
   if (raw && raw.toLowerCase() === "none") {
-    return { enabled: false, slot: null, reason: 'plugins.slots.memory="none"' };
+    return {
+      enabled: false,
+      slot: null,
+      reason: 'plugins.slots.memory="none"',
+    };
   }
   return { enabled: true, slot: raw || "memory-core" };
 }
@@ -76,7 +101,9 @@ async function resolveGatewayProbeSnapshot(params: {
   cfg: OpenClawConfig;
   opts: { timeoutMs?: number; all?: boolean };
 }): Promise<GatewayProbeSnapshot> {
-  const gatewayConnection = buildGatewayConnectionDetails({ config: params.cfg });
+  const gatewayConnection = buildGatewayConnectionDetails({
+    config: params.cfg,
+  });
   const isRemoteMode = params.cfg.gateway?.mode === "remote";
   const remoteUrlRaw =
     typeof params.cfg.gateway?.remote?.url === "string" ? params.cfg.gateway.remote.url : "";
@@ -156,10 +183,12 @@ export type StatusScanResult = {
 
 async function resolveMemoryStatusSnapshot(params: {
   cfg: OpenClawConfig;
+  sourceConfig: OpenClawConfig;
   agentStatus: Awaited<ReturnType<typeof getAgentLocalStatuses>>;
   memoryPlugin: MemoryPluginStatus;
+  timeoutMs?: number;
 }): Promise<MemoryStatusSnapshot | null> {
-  const { cfg, agentStatus, memoryPlugin } = params;
+  const { sourceConfig, agentStatus, memoryPlugin } = params;
   if (!memoryPlugin.enabled) {
     return null;
   }
@@ -167,16 +196,27 @@ async function resolveMemoryStatusSnapshot(params: {
     return null;
   }
   const agentId = agentStatus.defaultId ?? "main";
-  const { manager } = await getMemorySearchManager({ cfg, agentId, purpose: "status" });
-  if (!manager) {
+  const resolve = async (): Promise<MemoryStatusSnapshot | null> => {
+    const { manager } = await getMemorySearchManager({
+      cfg: sourceConfig,
+      agentId,
+      purpose: "status",
+    });
+    if (!manager) {
+      return null;
+    }
+    try {
+      await manager.probeVectorAvailability();
+    } catch {}
+    const status = manager.status();
+    await manager.close?.().catch(() => {});
+    return { agentId, ...status };
+  };
+  try {
+    return await withTimeout(resolve(), params.timeoutMs ?? 0);
+  } catch {
     return null;
   }
-  try {
-    await manager.probeVectorAvailability();
-  } catch {}
-  const status = manager.status();
-  await manager.close?.().catch(() => {});
-  return { agentId, ...status };
 }
 
 async function scanStatusJsonFast(opts: {
@@ -201,7 +241,10 @@ async function scanStatusJsonFast(opts: {
     includeRegistry: true,
   });
   const agentStatusPromise = getAgentLocalStatuses(cfg);
-  const summaryPromise = getStatusSummary({ config: cfg, sourceConfig: loadedRaw });
+  const summaryPromise = getStatusSummary({
+    config: cfg,
+    sourceConfig: loadedRaw,
+  });
 
   const tailscaleDnsPromise =
     tailscaleMode === "off"
@@ -236,9 +279,20 @@ async function scanStatusJsonFast(opts: {
   const gatewaySelf = gatewayProbe?.presence
     ? pickGatewaySelfPresence(gatewayProbe.presence)
     : null;
-  const channelsStatusPromise = resolveChannelsStatus({ cfg, gatewayReachable, opts });
+  const channelsStatusPromise = resolveChannelsStatus({
+    cfg,
+    gatewayReachable,
+    opts,
+  });
   const memoryPlugin = resolveMemoryPluginStatus(cfg);
-  const memoryPromise = resolveMemoryStatusSnapshot({ cfg, agentStatus, memoryPlugin });
+  const memoryTimeoutMs = opts.all ? Math.min(1500, opts.timeoutMs ?? 10_000) : 400;
+  const memoryPromise = resolveMemoryStatusSnapshot({
+    cfg,
+    sourceConfig: loadedRaw,
+    agentStatus,
+    memoryPlugin,
+    timeoutMs: memoryTimeoutMs,
+  });
   const [channelsStatus, memory] = await Promise.all([channelsStatusPromise, memoryPromise]);
   const channelIssues = channelsStatus ? collectChannelStatusIssues(channelsStatus) : [];
 
@@ -277,7 +331,10 @@ export async function scanStatus(
   _runtime: RuntimeEnv,
 ): Promise<StatusScanResult> {
   if (opts.json) {
-    return await scanStatusJsonFast({ timeoutMs: opts.timeoutMs, all: opts.all });
+    return await scanStatusJsonFast({
+      timeoutMs: opts.timeoutMs,
+      all: opts.all,
+    });
   }
   return await withProgress(
     {
@@ -349,7 +406,11 @@ export async function scanStatus(
       progress.tick();
 
       progress.setLabel("Querying channel status…");
-      const channelsStatus = await resolveChannelsStatus({ cfg, gatewayReachable, opts });
+      const channelsStatus = await resolveChannelsStatus({
+        cfg,
+        gatewayReachable,
+        opts,
+      });
       const channelIssues = channelsStatus ? collectChannelStatusIssues(channelsStatus) : [];
       progress.tick();
 
@@ -364,7 +425,11 @@ export async function scanStatus(
 
       progress.setLabel("Checking memory…");
       const memoryPlugin = resolveMemoryPluginStatus(cfg);
-      const memory = await resolveMemoryStatusSnapshot({ cfg, agentStatus, memoryPlugin });
+      const memory = await resolveMemoryStatusSnapshot({
+        cfg,
+        agentStatus,
+        memoryPlugin,
+      });
       progress.tick();
 
       progress.setLabel("Reading sessions…");
