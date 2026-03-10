@@ -73,6 +73,62 @@ vi.mock("../process/exec.js", () => ({
 import { scanStatus } from "./status.scan.js";
 
 describe("scanStatus", () => {
+  it("skips git fetch in status --json fast path", async () => {
+    mocks.readBestEffortConfig.mockResolvedValue({
+      marker: "source",
+      session: {},
+      plugins: { enabled: false },
+      gateway: {},
+    });
+    mocks.resolveCommandSecretRefsViaGateway.mockResolvedValue({
+      resolvedConfig: {
+        marker: "resolved",
+        session: {},
+        plugins: { enabled: false },
+        gateway: {},
+      },
+      diagnostics: [],
+    });
+    mocks.getUpdateCheckResult.mockResolvedValue({
+      installKind: "git",
+      git: null,
+      registry: null,
+    });
+    mocks.getAgentLocalStatuses.mockResolvedValue({
+      defaultId: "main",
+      agents: [],
+    });
+    mocks.getStatusSummary.mockResolvedValue({
+      linkChannel: { linked: false },
+      sessions: { count: 0, paths: [], defaults: {}, recent: [] },
+    });
+    mocks.buildGatewayConnectionDetails.mockReturnValue({
+      url: "ws://127.0.0.1:18789",
+      urlSource: "default",
+    });
+    mocks.resolveGatewayProbeAuthResolution.mockReturnValue({
+      auth: {},
+      warning: undefined,
+    });
+    mocks.probeGateway.mockResolvedValue({
+      ok: false,
+      url: "ws://127.0.0.1:18789",
+      connectLatencyMs: null,
+      error: "timeout",
+      close: null,
+      health: null,
+      status: null,
+      presence: null,
+      configSnapshot: null,
+    });
+
+    await scanStatus({ json: true }, {} as never);
+
+    expect(mocks.getUpdateCheckResult).toHaveBeenCalledWith(
+      expect.objectContaining({ fetchGit: false, includeRegistry: true, timeoutMs: 2500 }),
+    );
+  });
+
   it("passes sourceConfig into buildChannelsTable for summary-mode status output", async () => {
     mocks.readBestEffortConfig.mockResolvedValue({
       marker: "source",

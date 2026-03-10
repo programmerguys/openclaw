@@ -194,9 +194,10 @@ async function scanStatusJsonFast(opts: {
   const osSummary = resolveOsSummary();
   const tailscaleMode = cfg.gateway?.tailscale?.mode ?? "off";
   const updateTimeoutMs = opts.all ? 6500 : 2500;
+  const statusJsonFastPath = !opts.all;
   const updatePromise = getUpdateCheckResult({
     timeoutMs: updateTimeoutMs,
-    fetchGit: true,
+    fetchGit: !statusJsonFastPath,
     includeRegistry: true,
   });
   const agentStatusPromise = getAgentLocalStatuses(cfg);
