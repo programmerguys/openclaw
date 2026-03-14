@@ -125,20 +125,26 @@ export function buildBootstrapInjectionStats(params: {
   bootstrapFiles: WorkspaceBootstrapFile[];
   injectedFiles: EmbeddedContextFile[];
 }): BootstrapInjectionStat[] {
-  const injectedByPath = new Map<string, string>();
-  const injectedByBaseName = new Map<string, string>();
+  const injectedByPath = new Map<string, { content: string; name?: string }>();
+  const injectedByBaseName = new Map<string, { content: string; name?: string }>();
+  const injectedByName = new Map<string, { content: string; name?: string }>();
   for (const file of params.injectedFiles) {
     const pathValue = typeof file.path === "string" ? file.path.trim() : "";
+    const nameValue = typeof file.name === "string" ? file.name.trim() : "";
     if (!pathValue) {
       continue;
     }
+    const payload = { content: file.content, name: nameValue || undefined };
     if (!injectedByPath.has(pathValue)) {
-      injectedByPath.set(pathValue, file.content);
+      injectedByPath.set(pathValue, payload);
+    }
+    if (nameValue && !injectedByName.has(nameValue)) {
+      injectedByName.set(nameValue, payload);
     }
     const normalizedPath = pathValue.replace(/\\/g, "/");
     const baseName = path.posix.basename(normalizedPath);
     if (!injectedByBaseName.has(baseName)) {
-      injectedByBaseName.set(baseName, file.content);
+      injectedByBaseName.set(baseName, payload);
     }
   }
   return params.bootstrapFiles.map((file) => {
@@ -146,12 +152,12 @@ export function buildBootstrapInjectionStats(params: {
     const rawChars = file.missing ? 0 : (file.content ?? "").trimEnd().length;
     const injected =
       (pathValue ? injectedByPath.get(pathValue) : undefined) ??
-      injectedByPath.get(file.name) ??
+      injectedByName.get(file.name) ??
       injectedByBaseName.get(file.name);
-    const injectedChars = injected ? injected.length : 0;
+    const injectedChars = injected?.content ? injected.content.length : 0;
     const truncated = !file.missing && injectedChars < rawChars;
     return {
-      name: file.name,
+      name: injected?.name || file.name,
       path: pathValue || file.name,
       missing: file.missing,
       rawChars,

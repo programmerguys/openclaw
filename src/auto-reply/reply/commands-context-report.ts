@@ -1,3 +1,4 @@
+import path from "node:path";
 import { analyzeBootstrapBudget } from "../../agents/bootstrap-budget.js";
 import {
   resolveBootstrapMaxChars,
@@ -120,7 +121,12 @@ export async function buildContextReply(params: HandleCommandsParams): Promise<R
     const status = f.missing ? "MISSING" : f.truncated ? "TRUNCATED" : "OK";
     const raw = f.missing ? "0" : formatCharsAndTokens(f.rawChars);
     const injected = f.missing ? "0" : formatCharsAndTokens(f.injectedChars);
-    return `- ${f.name}: ${status} | raw ${raw} | injected ${injected}`;
+    const displayName =
+      (typeof f.name === "string" && f.name.trim()) ||
+      (typeof f.path === "string" && f.path.trim()
+        ? path.posix.basename(f.path.replace(/\\/g, "/"))
+        : "(unknown)");
+    return `- ${displayName}: ${status} | raw ${raw} | injected ${injected}`;
   });
 
   const sandboxLine = `Sandbox: mode=${report.sandbox?.mode ?? "unknown"} sandboxed=${report.sandbox?.sandboxed ?? false}`;
