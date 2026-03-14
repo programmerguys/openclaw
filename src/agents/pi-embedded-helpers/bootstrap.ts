@@ -225,6 +225,7 @@ export function buildBootstrapContextFiles(
       }
       remainingTotalChars = Math.max(0, remainingTotalChars - cappedMissingText.length);
       result.push({
+        name: file.name,
         path: pathValue,
         content: cappedMissingText,
       });
@@ -249,6 +250,7 @@ export function buildBootstrapContextFiles(
     }
     remainingTotalChars = Math.max(0, remainingTotalChars - contentWithinBudget.length);
     result.push({
+      name: file.name,
       path: pathValue,
       content: contentWithinBudget,
     });

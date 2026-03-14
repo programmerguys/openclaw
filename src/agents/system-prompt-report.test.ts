@@ -112,4 +112,31 @@ describe("buildSystemPromptReport", () => {
 
     expect(report.injectedWorkspaceFiles[0]?.injectedChars).toBe("trimmed".length);
   });
+
+  it("preserves custom injected bootstrap names in the report", () => {
+    const file = makeBootstrapFile({
+      name: "SHARED.md" as WorkspaceBootstrapFile["name"],
+      path: "/tmp/workspace/references/shared-agent-playbook.md",
+      content: "shared content",
+    });
+    const report = buildSystemPromptReport({
+      source: "run",
+      generatedAt: 0,
+      bootstrapMaxChars: 20_000,
+      systemPrompt: "system",
+      bootstrapFiles: [file],
+      injectedFiles: [
+        {
+          name: "SHARED.md",
+          path: "/tmp/workspace/references/shared-agent-playbook.md",
+          content: "shared content",
+        },
+      ],
+      skillsPrompt: "",
+      tools: [],
+    });
+
+    expect(report.injectedWorkspaceFiles[0]?.name).toBe("SHARED.md");
+    expect(report.injectedWorkspaceFiles[0]?.injectedChars).toBe("shared content".length);
+  });
 });

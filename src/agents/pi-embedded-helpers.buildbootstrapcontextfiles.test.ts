@@ -30,6 +30,7 @@ describe("buildBootstrapContextFiles", () => {
     const files = [makeFile({ missing: true, content: undefined })];
     expect(buildBootstrapContextFiles(files)).toEqual([
       {
+        name: "AGENTS.md",
         path: "/tmp/AGENTS.md",
         content: "[MISSING] Expected at: /tmp/AGENTS.md",
       },

@@ -347,7 +347,7 @@ export type SessionSystemPromptReport = {
     nonProjectContextChars: number;
   };
   injectedWorkspaceFiles: Array<{
-    name: string;
+    name?: string;
     path: string;
     missing: boolean;
     rawChars: number;
